@@ -244,18 +244,185 @@ void Data::load(const char* moptions_file) {
   // Spatial sampling of cube
   sample = 1;
 
-  // Read in the metadata
+  // NEW METADATA LOADING SECTION - REPLACES OLD METADATA READING
+  std::cout << "Loading metadata from: " << metadata_file << std::endl;
   fin.open(metadata_file, std::ios::in);
-  if (!fin)
-    std::cerr<<"# ERROR: couldn't open file "<<metadata_file<<"."<<std::endl;
-  fin >> ni >> nj;
-  fin >> nr;
-  fin >> x_min >> x_max >> y_min >> y_max;
-  fin >> r_min >> r_max;
-  fin.close();
-  std::cout<<"Metadata Loaded..."<<std::endl;
+  if (!fin) {
+    std::cerr << "# ERROR: couldn't open file " << metadata_file << "." << std::endl;
+    exit(1);
+  }
 
-  // Make sure maximum > minimum
+  std::string metadata_line, keyword;
+  double value1, value2;
+  
+  // initialise validation flags
+  bool ni_set = false, nj_set = false;
+  bool x_min_set = false, x_max_set = false;
+  bool y_min_set = false, y_max_set = false;
+  
+  while (std::getline(fin, metadata_line)) {
+    // skip empty lines and comments
+    if (metadata_line.empty() || metadata_line[0] == '#') {
+      continue;
+    }
+    
+    // remove inline comments
+    size_t comment_pos = metadata_line.find('#');
+    if (comment_pos != std::string::npos) {
+      metadata_line = metadata_line.substr(0, comment_pos);
+    }
+    
+    // trim whitespace
+    metadata_line.erase(0, metadata_line.find_first_not_of(" \t"));
+    metadata_line.erase(metadata_line.find_last_not_of(" \t") + 1);
+    
+    if (metadata_line.empty()) continue;
+    
+    std::istringstream iss(metadata_line);
+    iss >> keyword;
+    
+    // convert keyword to uppercase for case-insensitive comparison
+    std::transform(keyword.begin(), keyword.end(), keyword.begin(), ::toupper);
+    
+    if (keyword == "NI") {
+      iss >> ni;
+      if (iss.fail()) {
+        std::cerr << "# ERROR: Invalid ni value: " << metadata_line << std::endl;
+        exit(1);
+      }
+      ni_set = true;
+      std::cout << "  NI: " << ni << std::endl;
+      
+    } else if (keyword == "NJ") {
+      iss >> nj;
+      if (iss.fail()) {
+        std::cerr << "# ERROR: Invalid nj value: " << metadata_line << std::endl;
+        exit(1);
+      }
+      nj_set = true;
+      std::cout << "  NJ: " << nj << std::endl;
+      
+    } else if (keyword == "X_MIN") {
+      iss >> x_min;
+      if (iss.fail()) {
+        std::cerr << "# ERROR: Invalid x_min value: " << metadata_line << std::endl;
+        exit(1);
+      }
+      x_min_set = true;
+      std::cout << "  X_MIN: " << x_min << std::endl;
+      
+    } else if (keyword == "X_MAX") {
+      iss >> x_max;
+      if (iss.fail()) {
+        std::cerr << "# ERROR: Invalid x_max value: " << metadata_line << std::endl;
+        exit(1);
+      }
+      x_max_set = true;
+      std::cout << "  X_MAX: " << x_max << std::endl;
+      
+    } else if (keyword == "Y_MIN") {
+      iss >> y_min;
+      if (iss.fail()) {
+        std::cerr << "# ERROR: Invalid y_min value: " << metadata_line << std::endl;
+        exit(1);
+      }
+      y_min_set = true;
+      std::cout << "  Y_MIN: " << y_min << std::endl;
+      
+    } else if (keyword == "Y_MAX") {
+      iss >> y_max;
+      if (iss.fail()) {
+        std::cerr << "# ERROR: Invalid y_max value: " << metadata_line << std::endl;
+        exit(1);
+      }
+      y_max_set = true;
+      std::cout << "  Y_MAX: " << y_max << std::endl;
+      
+    } else if (keyword == "WAVE_RANGE") {
+      double r_min_win, r_max_win;
+      int orig_start, orig_end, n_bins_win;
+      
+      iss >> r_min_win >> r_max_win >> orig_start >> orig_end >> n_bins_win;
+      
+      if (iss.fail()) {
+        std::cerr << "# ERROR: Invalid wave_range format: " << metadata_line << std::endl;
+        std::cerr << "Expected: wave_range <min> <max> <start_bin> <end_bin> <n_bins>" << std::endl;
+        exit(1);
+      }
+      
+      // validation checks
+      if (r_min_win >= r_max_win) {
+        std::cerr << "# ERROR: Invalid wavelength range - min must be < max: " 
+                 << r_min_win << " >= " << r_max_win << std::endl;
+        exit(1);
+      }
+      
+      if (orig_start > orig_end) {
+        std::cerr << "# ERROR: Invalid bin range - start_bin must be <= end_bin: " 
+                 << orig_start << " > " << orig_end << std::endl;
+        exit(1);
+      }
+      
+      if (n_bins_win != (orig_end - orig_start + 1)) {
+        std::cerr << "# ERROR: Inconsistent bin count: n_bins=" << n_bins_win 
+                 << " but (end_bin - start_bin + 1)=" << (orig_end - orig_start + 1) << std::endl;
+        exit(1);
+      }
+      
+      WavelengthWindow window;
+      window.r_min = r_min_win;
+      window.r_max = r_max_win;
+      window.orig_start_bin = orig_start;
+      window.orig_end_bin = orig_end;
+      window.n_bins = n_bins_win;
+      window.dr = (r_max_win - r_min_win) / n_bins_win;
+      
+      wavelength_windows.push_back(window);
+      
+      std::cout << "  WAVE_RANGE: " << r_min_win << " - " << r_max_win << " Å "
+               << "(bins " << orig_start << "-" << orig_end << ", n=" << n_bins_win << ")" << std::endl;
+      
+    } else if (!keyword.empty()) {
+      std::cerr << "# WARNING: Unknown keyword in metadata: " << keyword << std::endl;
+    }
+  }
+  fin.close();
+  
+  // validate required parameters
+  if (!ni_set) {
+    std::cerr << "# ERROR: 'ni' not specified in metadata file" << std::endl;
+    exit(1);
+  }
+  if (!nj_set) {
+    std::cerr << "# ERROR: 'nj' not specified in metadata file" << std::endl;
+    exit(1);
+  }
+  if (!x_min_set || !x_max_set || !y_min_set || !y_max_set) {
+    std::cerr << "# ERROR: Spatial coordinates not fully specified in metadata file" << std::endl;
+    exit(1);
+  }
+  if (wavelength_windows.empty()) {
+    std::cerr << "# ERROR: No wavelength ranges specified in metadata file" << std::endl;
+    exit(1);
+  }
+  
+  // sort wavelength windows by start bin index
+  std::sort(wavelength_windows.begin(), wavelength_windows.end(),
+            [](const WavelengthWindow& a, const WavelengthWindow& b) {
+                return a.orig_start_bin < b.orig_start_bin;
+            });
+  
+  // validate bin indices are sequential and non-overlapping
+  validate_bin_indices();
+  
+  // process wavelength windows and calculate dimensions
+  process_wavelength_windows();
+  
+  std::cout << "Metadata loaded successfully." << std::endl;
+  std::cout << "Found " << wavelength_windows.size() << " wavelength windows, " 
+            << nr << " total wavelength bins" << std::endl;
+
+  // make sure maximum > minimum for spatial coordinates
   if (x_max <= x_min || y_max <= y_min)
     std::cerr<<"# ERROR: strange input in "<<metadata_file<<"."<<std::endl;
 
@@ -264,6 +431,9 @@ void Data::load(const char* moptions_file) {
 
   var = read_cube(var_file);
   std::cout<<"Variance Loaded...\n";
+
+  // check the desired emissions lines are located in the windows
+  validate_emission_lines();
 
   /*
     Determine the valid data pixels
@@ -301,7 +471,8 @@ void Data::load(const char* moptions_file) {
   // Compute pixel widths
   dx = (x_max - x_min)/nj;
   dy = (y_max - y_min)/ni;
-  dr = (r_max - r_min)/nr;
+  // Note: dr is now calculated in process_wavelength_windows()
+  
   for (size_t i=0; i<psf_sigma.size(); i++) {
     psf_sigma_overdx.push_back(psf_sigma[i]/dx);
     psf_sigma_overdy.push_back(psf_sigma[i]/dy);
@@ -341,9 +512,8 @@ void Data::load(const char* moptions_file) {
   x_pad_dxos = x_pados*dxos;
   y_pad_dyos = y_pados*dyos;
 
-
   // Construct defaults that are dependent on data
-  if (!radiuslim_min) {
+  if (!radiuslim_min_flag) {
     radiuslim_min = pixel_width;
   }
   if (!gamma_pos_flag) {
@@ -354,6 +524,120 @@ void Data::load(const char* moptions_file) {
   compute_ray_grid();
 
   summarise_model();
+}
+
+void Data::process_wavelength_windows() {
+    /*
+        process wavelength windows using the provided bin indices
+    */
+    
+    int total_wavelength_bins = 0;
+    
+    for (size_t w = 0; w < wavelength_windows.size(); w++) {
+        auto& window = wavelength_windows[w];
+        
+        // set global indices for the combined array
+        window.start_idx = total_wavelength_bins;
+        window.end_idx = total_wavelength_bins + window.n_bins - 1;
+        total_wavelength_bins += window.n_bins;
+        
+        // create wavelength array for this window
+        window.r.resize(window.n_bins);
+        
+        for (int k = 0; k < window.n_bins; k++) {
+            window.r[k] = window.r_min + (k + 0.5) * window.dr;
+        }
+        
+        std::cout << "  Window " << w+1 << ": [" << window.r_min << ", " 
+                 << window.r_max << "] Å (" << window.n_bins << " bins, " 
+                 << "dr=" << window.dr << " Å/bin)" << std::endl;
+    }
+    
+    nr = total_wavelength_bins;
+    
+    // create combined wavelength array
+    r_full.clear();
+    r_full.reserve(nr);
+    for (const auto& window : wavelength_windows) {
+        r_full.insert(r_full.end(), window.r.begin(), window.r.end());
+    }
+    
+    // calculate overall dr for compatibility (weighted average)
+    double total_range = wavelength_windows.back().r_max - wavelength_windows[0].r_min;
+    dr = total_range / nr;
+    
+    std::cout << "Total wavelength coverage: " << wavelength_windows[0].r_min 
+              << " - " << wavelength_windows.back().r_max << " Å" << std::endl;
+    std::cout << "Average spectral resolution: " << dr << " Å/bin" << std::endl;
+}
+
+void Data::validate_bin_indices() {
+    /*
+        validate that bin indices are sequential and non-overlapping
+    */
+    
+    int expected_start = 0;
+    
+    for (size_t w = 0; w < wavelength_windows.size(); w++) {
+        const auto& window = wavelength_windows[w];
+        
+        if (window.orig_start_bin != expected_start) {
+            std::cerr << "# ERROR: Non-sequential bin indices in window " << w+1 << std::endl;
+            std::cerr << "Expected start_bin=" << expected_start 
+                     << ", got start_bin=" << window.orig_start_bin << std::endl;
+            std::cerr << "Windows must be sequential with no gaps or overlaps." << std::endl;
+            exit(1);
+        }
+        
+        expected_start = window.orig_end_bin + 1;
+        
+        std::cout << "  Validated window " << w+1 << ": bins " 
+                 << window.orig_start_bin << "-" << window.orig_end_bin 
+                 << " (" << window.n_bins << " bins)" << std::endl;
+    }
+}
+
+void Data::validate_emission_lines() {
+    /*
+        validate that all emission lines fall within the defined wavelength windows
+    */
+    std::cout << "\nValidating emission lines against wavelength windows:" << std::endl;
+    
+    bool all_valid = true;
+    
+    for (size_t l = 0; l < em_line.size(); l++) {
+        std::cout << "  Line group " << l+1 << ":" << std::endl;
+        
+        for (size_t i = 0; i < em_line[l].size(); i++) {
+            double line_wave = em_line[l][i];
+            bool found = false;
+            
+            for (size_t w = 0; w < wavelength_windows.size(); w++) {
+                const auto& window = wavelength_windows[w];
+                if (line_wave >= window.r_min && line_wave <= window.r_max) {
+                    std::cout << "    Line " << line_wave << " Å: ✓ Found in window " 
+                             << w+1 << " [" << window.r_min << ", " << window.r_max << "] Å" << std::endl;
+                    found = true;
+                    break;
+                }
+            }
+            
+            if (!found) {
+                std::cerr << "    Line " << line_wave << " Å: ✗ NOT FOUND in any wavelength window!" << std::endl;
+                all_valid = false;
+            }
+        }
+    }
+    
+    if (!all_valid) {
+        std::cerr << "\n# ERROR: Some emission lines are outside the wavelength windows!" << std::endl;
+        std::cerr << "Either:" << std::endl;
+        std::cerr << "  1. Add more wave_range entries to metadata.txt (and subsequently make sure that is reflected in data.txt), or" << std::endl;
+        std::cerr << "  2. Remove/modify LINE entries in MODEL_OPTIONS" << std::endl;
+        exit(1);
+    }
+    
+    std::cout << "✓ All emission lines validated successfully.\n" << std::endl;
 }
 
 std::vector< std::vector< std::vector<double> > > Data::arr_3d() {
@@ -400,9 +684,10 @@ void Data::compute_ray_grid() {
     }
   }
 
+  // UPDATED: use the combined wavelength array from all windows
   r.assign(nr, 0.0);
   for(size_t k=0; k<r.size(); k++)
-    r[k] = r_min + (k + 0.5)*dr;
+    r[k] = r_full[k];  // Use the combined array from all windows
 }
 
 void Data::summarise_model() {
@@ -426,6 +711,15 @@ void Data::summarise_model() {
       std::cout<<std::endl;
     }
   }
+
+  // display wavelength window information
+  std::cout<<"Wavelength Windows:"<<std::endl;
+  for (size_t w = 0; w < wavelength_windows.size(); w++) {
+    const auto& window = wavelength_windows[w];
+    std::cout<<"  Window "<<w+1<<": "<<window.r_min<<" - "<<window.r_max<<" Å ("
+             <<window.n_bins<<" bins)"<<std::endl;
+  }
+  std::cout<<"Total wavelength bins: "<<nr<<std::endl;
 
   if (nfixed)
     std::cout<<"N: "<<nmax<<std::endl;

@@ -81,8 +81,19 @@ class Data
   // Coordinates of image boundaries
   double x_min, x_max, y_min, y_max;
 
-  // Wavelength boundaries
-  double r_min, r_max;
+  public:
+  // wavelength window structure for multi-window support
+  struct WavelengthWindow {
+    double r_min, r_max;           // wavelength range (Angstroms)
+    int start_idx, end_idx;        // global indices in combined array
+    int n_bins;                    // number of bins in this window
+    int orig_start_bin, orig_end_bin;  // original bin indices from preprocessing
+    std::vector<double> r;         // wavelength values
+    double dr;                     // wavelength resolution for this window
+  };
+  private:
+  std::vector<WavelengthWindow> wavelength_windows;
+  std::vector<double> r_full;  // combined wavelength array from all windows
 
   // Pixel widths
   double dx, dy;
@@ -141,6 +152,11 @@ class Data
   void summarise_model();
   void compute_ray_grid();
 
+  // new methods for wavelength window support
+  void process_wavelength_windows();
+  void validate_bin_indices();
+  void validate_emission_lines();
+
  public:
   Data();
   void load(const char* moptions_file);
@@ -158,8 +174,6 @@ class Data
   double get_x_max() const { return x_max; }
   double get_y_min() const { return y_min; }
   double get_y_max() const { return y_max; }
-  double get_r_min() const { return r_min; }
-  double get_r_max() const { return r_max; }
   double get_dx() const { return dx; }
   double get_dy() const { return dy; }
   double get_dr() const { return dr; }
@@ -251,6 +265,10 @@ class Data
   const std::vector< std::vector<int> >& get_valid() const
   { return valid; }
 
+  // new getters for wavelength window support
+  const std::vector<WavelengthWindow>& get_wavelength_windows() const { return wavelength_windows; }
+  const std::vector<double>& get_r_full() const { return r_full; }
+
   // Singleton
  private:
   static Data instance;
@@ -259,4 +277,3 @@ class Data
 };
 
 #endif  // BLOBBY3D_DATA_H_
-

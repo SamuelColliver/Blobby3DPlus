@@ -12,11 +12,11 @@ object and plotted a handful of sample attributes.
 import numpy as np
 import matplotlib.pyplot as plt
 
-import dnest4 as dn4
+from dnest4 import postprocess
 from pyblobby3d import PostBlobby3D
 from pyblobby3d import SpectralModel
 
-dn4.postprocess()
+postprocess()
 
 post_b3d = PostBlobby3D(
         samples_path='posterior_sample.txt',
@@ -104,3 +104,5 @@ ax[1].set_title('Convolved')
 ax[1].imshow(fit[3], vmin=10.0, vmax=50.0)
 
 fig.tight_layout()
+
+plt.show()

@@ -513,41 +513,46 @@ void DiscModel::construct_cube() {
 
 void DiscModel::construct_line_cube(
   double line, double factor, std::vector< std::vector<double> >& flux_map) {
-  // TODO: Long term this function should be taken out of the class and
-  // generalised to take any flux, v, vdisp maps to construct a cube for a
-  // given line.
+  
   const double sigma_lsfsq = pow(Data::get_instance().get_lsf_sigma(), 2);
-  const std::vector<double>& wave = Data::get_instance().get_r();
-  const double dr = Data::get_instance().get_dr();
-
-  double lambda;
-  double sigma_lambda;
-  double invtwo_wlsq;
+  const std::vector<Data::WavelengthWindow>& windows = Data::get_instance().get_wavelength_windows();
+  
+  // find which window contains this line
+  int target_window = -1;
+  for (size_t w = 0; w < windows.size(); w++) {
+    if (line >= windows[w].r_min && line <= windows[w].r_max) {
+      target_window = w;
+      break;
+    }
+  }
+  
+  if (target_window == -1) {
+    std::cerr << "# ERROR: Line " << line << " Å not found in any wavelength window!" << std::endl;
+    std::cerr << "This should have been caught during validation." << std::endl;
+    return;
+  }
+  
+  const auto& window = windows[target_window];
+  
+  double lambda, sigma_lambda, invtwo_wlsq;
   double ha_cdf_min, ha_cdf_max;
-
-  double flux_sum = 0.0;
-  double flux_sum_map = 0.0;
-  for (size_t i=0; i<preconvolved.size(); i++) {
-    for (size_t j=0; j<preconvolved[i].size(); j++) {
-      // Calculate mean lambda for lines
-      lambda = line*rel_lambda[i][j];
-
-      // Calculate line width
-      sigma_lambda = line*vdisp[i][j];
-      invtwo_wlsq = 1.0/sqrt(2.0*(pow(sigma_lambda, 2) + sigma_lsfsq));
-
-      // Calculate flux for 1st wavelength bin
-      ha_cdf_min = LookupErf::evaluate((wave[0] - 0.5*dr - lambda)*invtwo_wlsq);
-      ha_cdf_max = LookupErf::evaluate((wave[0] + 0.5*dr - lambda)*invtwo_wlsq);
-      preconvolved[i][j][0] = 0.5*factor*flux_map[i][j]*(ha_cdf_max - ha_cdf_min);
-
-      // Loop through remaining bins
-      flux_sum_map += factor*flux_map[i][j];
-      for (size_t r=1; r<wave.size(); r++) {
-        ha_cdf_min = ha_cdf_max;
-        ha_cdf_max = LookupErf::evaluate((wave[r] + 0.5*dr - lambda)*invtwo_wlsq);
-        preconvolved[i][j][r] += 0.5*factor*flux_map[i][j]*(ha_cdf_max - ha_cdf_min);
-        flux_sum += 0.5*factor*flux_map[i][j]*(ha_cdf_max - ha_cdf_min);
+  
+  for (size_t i = 0; i < preconvolved.size(); i++) {
+    for (size_t j = 0; j < preconvolved[i].size(); j++) {
+      // calculate line properties at this spatial position
+      lambda = line * rel_lambda[i][j];
+      sigma_lambda = line * vdisp[i][j];
+      invtwo_wlsq = 1.0 / sqrt(2.0 * (pow(sigma_lambda, 2) + sigma_lsfsq));
+      
+      // process all wavelength bins in the target window
+      for (int local_r = 0; local_r < window.n_bins; local_r++) {
+        int global_r = window.start_idx + local_r;  // Global index in preconvolved array
+        double wave_center = window.r[local_r];
+        
+        ha_cdf_min = LookupErf::evaluate((wave_center - 0.5*window.dr - lambda) * invtwo_wlsq);
+        ha_cdf_max = LookupErf::evaluate((wave_center + 0.5*window.dr - lambda) * invtwo_wlsq);
+        
+        preconvolved[i][j][global_r] += 0.5 * factor * flux_map[i][j] * (ha_cdf_max - ha_cdf_min);
       }
     }
   }
