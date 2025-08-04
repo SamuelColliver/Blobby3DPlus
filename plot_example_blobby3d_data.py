@@ -322,19 +322,21 @@ def main():
     WINDOW_SIZE = 5.0  # size (radius; Angstrom) of the window (ie. 8 Angstrom = 16 total)
     
     # file paths
-    data_file = './examples/485885/data.txt'
-    var_file = './examples/485885/var.txt'
-    metadata_file = './examples/485885/metadata.txt'
+    data_file = './examples/65410/data.txt'
+    var_file = './examples/65410/var.txt'
+    metadata_file = './examples/65410/metadata.txt'
 
     # define emission lines for different wavelength ranges
     all_lines = {
-        'H-beta': 4861.3,
-        '[OIII]5007': 5006.8,
-        'H-alpha': 6562.81,
-        '[NII]6548': 6548.1,
-        '[NII]6583': 6583.1,
-        '[SII]6717': 6716.4,
-        '[SII]6731': 6730.8
+        '[OII]3726': 3726.03, # in blue image
+        '[OII]3729': 3728.82 , # in blue image
+        'H-beta': 4861.3, # in blue image
+        '[OIII]5007': 5006.8, # in blue image
+        'H-alpha': 6562.81, # red image
+        '[NII]6548': 6548.1, # red image
+        '[NII]6583': 6583.1, # red image
+        '[SII]6717': 6716.4, # red image
+        '[SII]6731': 6730.8 # red image
     }
 
     # +++++++++ End of can be Edited +++++++++++++

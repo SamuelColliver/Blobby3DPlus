@@ -13,7 +13,9 @@ tests/
 
 # Ignore particular examples #
 ##############################
-examples/279943
+examples/
+!examples/485885/
+!examples/485885-windowed/
 
 # Data/Results #
 ################

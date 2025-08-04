@@ -516,6 +516,7 @@ void DiscModel::construct_line_cube(
   
   const double sigma_lsfsq = pow(Data::get_instance().get_lsf_sigma(), 2);
   const std::vector<Data::WavelengthWindow>& windows = Data::get_instance().get_wavelength_windows();
+  const int nr = Data::get_instance().get_nr();  // add explicit nr definition
   
   // find which window contains this line
   int target_window = -1;
@@ -529,7 +530,7 @@ void DiscModel::construct_line_cube(
   if (target_window == -1) {
     std::cerr << "# ERROR: Line " << line << " Å not found in any wavelength window!" << std::endl;
     std::cerr << "This should have been caught during validation." << std::endl;
-    return;
+    return;  // early return if line not found
   }
   
   const auto& window = windows[target_window];
@@ -546,7 +547,16 @@ void DiscModel::construct_line_cube(
       
       // process all wavelength bins in the target window
       for (int local_r = 0; local_r < window.n_bins; local_r++) {
-        int global_r = window.start_idx + local_r;  // Global index in preconvolved array
+        int global_r = window.start_idx + local_r;  // global index in preconvolved array
+        
+        // add bounds checking
+        if (global_r >= nr || global_r < 0) {
+          std::cerr << "# ERROR: global_r index " << global_r 
+                   << " out of bounds (nr=" << nr << ") for line " << line 
+                   << " Å in window " << target_window << std::endl;
+          continue;
+        }
+        
         double wave_center = window.r[local_r];
         
         ha_cdf_min = LookupErf::evaluate((wave_center - 0.5*window.dr - lambda) * invtwo_wlsq);
@@ -665,9 +675,17 @@ void DiscModel::add_blob_flux(std::vector< std::vector<double> >& components) {
     // for (size_t l=0; l<nlines; l++)
     //  f[l] = components[k][5+l];
 
-    f[0] = components[k][5];
-    for (size_t l=1; l<nlines; l++)
-      f[l] = components[k][5]*components[k][5+1];  // Testing: Flux constrained secondary line constrained relative to 1st
+
+    //before
+    //f[0] = components[k][5];
+    //for (size_t l=1; l<nlines; l++)
+    //  f[l] = components[k][5]*components[k][5+1];  // BUG: All secondary lines get same ratio!
+
+    //
+    for (size_t l=0; l<nlines; l++)
+      f[l] = components[k][5+l]; // remove flux constrained line
+    //
+
 
     // xc, yc in disc plane
     xc = rc*cos(thetac);

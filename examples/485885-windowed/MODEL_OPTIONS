@@ -1,9 +1,37 @@
-# Specify model options
+# model options for blobby3d
+# lines starting with # are comments and will be ignored
+
+# line spread function fwhm (angstroms)
 LSFFWHM	1.61
+
+# point spread function weights (for gaussian decomposition)
 PSFWEIGHT	0.6460957385346204 0.35390426146537957
+
+# point spread function fwhm (arcseconds) 
 PSFFWHM	2.300859878831419   1.4309603303694296
+
+# galaxy inclination angle (radians)
 INC	0.572591
+
+# emission line definitions
+# format: LINE main_wavelength [coupled_wavelength1 ratio1 [coupled_wavelength2 ratio2 ...]]
+
+# examples:
+# single line: h-alpha only
+# LINE	6562.81
+
+# doublet: [nii] doublet (6583 main line, 6548 coupled with ratio 1:3)
+# LINE	6583.1	6548.1 0.33333
+
+# triplet: h-alpha + both [nii] lines (h-alpha main, [nii]6583 at ratio 0.3, [nii]6548 at ratio 0.1)
+# LINE	6562.81	6583.1 0.3	6548.1 0.1
+
+# current configuration: two separate line groups
 LINE	6562.81
-LINE	6583.1	6548.1
-NMAX 1
-NFIXED TRUE
+LINE	6583.1	6548.1 0.33333
+
+# maximum number of blobs
+NMAX 100
+
+# fix the number of blobs (true) or allow variable number (false)
+NFIXED FALSE

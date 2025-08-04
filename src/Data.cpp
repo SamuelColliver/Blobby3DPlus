@@ -14,10 +14,10 @@ Data Data::instance;
 Data::Data() {}
 
 void Data::load(const char* moptions_file) {
-  // Loading data comment
+  // loading data comment
   std::cout<<"\nLoading data:\n";
 
-  // Load model options
+  // load model options
   std::fstream fin(moptions_file, std::ios::in);
   if (!fin)
     std::cerr<<"# ERROR: couldn't open file "<<moptions_file<<"."<<std::endl;
@@ -36,14 +36,27 @@ void Data::load(const char* moptions_file) {
   bool inc_flag = false;
   bool gamma_pos_flag = false;
   bool radiuslim_min_flag = false;
+  
   while (std::getline(fin, line)) {
+    // remove comments - everything after '#'
+    size_t comment_pos = line.find('#');
+    if (comment_pos != std::string::npos) {
+      line = line.substr(0, comment_pos);
+    }
+    
+    // trim whitespace from the end
+    line.erase(line.find_last_not_of(" \t\r\n") + 1);
+    
+    // skip empty lines
+    if (line.empty()) {
+      continue;
+    }
+    
     std::istringstream lin(line);
     lin >> name;
     std::transform(name.begin(), name.end(), name.begin(), ::toupper);
 
-    if (line.empty()) {
-      continue;
-    } else if (name[0] == '#') {
+    if (name.empty()) {
       continue;
     } else if (name == "METADATA_FILE") {
         lin >> metadata_file;
@@ -120,7 +133,7 @@ void Data::load(const char* moptions_file) {
     } else if (name == "SIGMA0_MAX") {
       lin >> sigma_max;
     } else if (name == "RADIUSLIM_MIN") {
-      lin >> radiuslim_min; // Not passed to ConditionalPrior yet
+      lin >> radiuslim_min; // not passed to ConditionalPrior yet
       radiuslim_min_flag = true;
     } else if (name == "RADIUSLIM_MAX") {
       lin >> radiuslim_max;
@@ -184,7 +197,7 @@ void Data::load(const char* moptions_file) {
   }
   fin.close();
 
-  // Check required parameters are provided
+  // check required parameters are provided
   if (!line_flag) {
     std::cerr
       <<"# ERROR: Required keyword (LINE) not provided."<<std::endl;
@@ -225,26 +238,26 @@ void Data::load(const char* moptions_file) {
   // sigma cutoff parameter for blobs
   sigma_cutoff = 5.0;
 
-  // PSF convolution method message
+  // psf convolution method message
   for(size_t i=0; i<psf_fwhm.size(); i++)
     psf_sigma.push_back(psf_fwhm[i]/sqrt(8.0*log(2.0)));
 
-  // LSF in wavelength (needs to be redshift corrected)
+  // lsf in wavelength (needs to be redshift corrected)
   lsf_sigma = lsf_fwhm/sqrt(8.0*log(2.0));
 
-  // Model choice (only for testing)
+  // model choice (only for testing)
   model = 0;
 
-  // Override blob parameters for disk model
+  // override blob parameters for disk model
   if (model == 1) {
     nmax = 0;
     nfixed = true;
   }
 
-  // Spatial sampling of cube
+  // spatial sampling of cube
   sample = 1;
 
-  // NEW METADATA LOADING SECTION - REPLACES OLD METADATA READING
+  // new metadata loading section - replaces old metadata reading
   std::cout << "Loading metadata from: " << metadata_file << std::endl;
   fin.open(metadata_file, std::ios::in);
   if (!fin) {
@@ -436,8 +449,8 @@ void Data::load(const char* moptions_file) {
   validate_emission_lines();
 
   /*
-    Determine the valid data pixels
-    Considered valid if sigma > 0.0 and there is at least 1 non-zero value.
+    determine the valid data pixels
+    considered valid if sigma > 0.0 and there is at least 1 non-zero value.
    */
   valid.assign(1, std::vector<int>(2));
   double tmp_im, tmp_sig;
@@ -452,7 +465,7 @@ void Data::load(const char* moptions_file) {
         tmp_sig += var[i][j][r];
 	    }
 
-      // Add valid pixels to array
+      // add valid pixels to array
       if ((tmp_im == 1.0) && (tmp_sig > 0.0)) {
         tmp_vec[0] = i;
         tmp_vec[1] = j;
@@ -468,28 +481,28 @@ void Data::load(const char* moptions_file) {
   }
   std::cout<<"Valid pixels determined...\n\n";
 
-  // Compute pixel widths
+  // compute pixel widths
   dx = (x_max - x_min)/nj;
   dy = (y_max - y_min)/ni;
-  // Note: dr is now calculated in process_wavelength_windows()
+  // note: dr is now calculated in process_wavelength_windows()
   
   for (size_t i=0; i<psf_sigma.size(); i++) {
     psf_sigma_overdx.push_back(psf_sigma[i]/dx);
     psf_sigma_overdy.push_back(psf_sigma[i]/dy);
   }
 
-  // Calculate geometric widths
+  // calculate geometric widths
   pixel_width = sqrt(dx*dy);
   image_width = sqrt((x_max - x_min)*(y_max - y_min));
 
   // rc_max for TruncatedExponential distribution
   rc_max = sqrt(pow(abs(x_max - x_min), 2) + pow(abs(y_max - y_min), 2))/cos(inc);
 
-  // Image centres
+  // image centres
   x_imcentre = (x_min + x_max)/2.0;
   y_imcentre = (y_min + y_max)/2.0;
 
-  // Array padding to help edge problems
+  // array padding to help edge problems
   x_pad = (int)ceil(sigma_pad*psf_sigma[0]/dx);
   y_pad = (int)ceil(sigma_pad*psf_sigma[0]/dy);
   ni += 2*y_pad;
@@ -502,7 +515,7 @@ void Data::load(const char* moptions_file) {
   y_min -= y_pad_dy;
   y_max += y_pad_dy;
 
-  // Compute spatially oversampled parameters
+  // compute spatially oversampled parameters
   dxos = abs(dx)/sample;
   dyos = abs(dy)/sample;
   x_pados = (int)ceil(sigma_pad*psf_sigma[0]/dxos);
@@ -512,7 +525,7 @@ void Data::load(const char* moptions_file) {
   x_pad_dxos = x_pados*dxos;
   y_pad_dyos = y_pados*dyos;
 
-  // Construct defaults that are dependent on data
+  // construct defaults that are dependent on data
   if (!radiuslim_min_flag) {
     radiuslim_min = pixel_width;
   }
@@ -520,7 +533,7 @@ void Data::load(const char* moptions_file) {
     gamma_pos = 0.1*image_width;
   }
 
-  // Compute x, y, r arrays
+  // compute x, y, r arrays
   compute_ray_grid();
 
   summarise_model();
@@ -600,6 +613,7 @@ void Data::validate_bin_indices() {
 void Data::validate_emission_lines() {
     /*
         validate that all emission lines fall within the defined wavelength windows
+        fixed to properly handle coupled lines with ratios
     */
     std::cout << "\nValidating emission lines against wavelength windows:" << std::endl;
     
@@ -608,23 +622,49 @@ void Data::validate_emission_lines() {
     for (size_t l = 0; l < em_line.size(); l++) {
         std::cout << "  Line group " << l+1 << ":" << std::endl;
         
-        for (size_t i = 0; i < em_line[l].size(); i++) {
-            double line_wave = em_line[l][i];
-            bool found = false;
-            
-            for (size_t w = 0; w < wavelength_windows.size(); w++) {
-                const auto& window = wavelength_windows[w];
-                if (line_wave >= window.r_min && line_wave <= window.r_max) {
-                    std::cout << "    Line " << line_wave << " Å: ✓ Found in window " 
-                             << w+1 << " [" << window.r_min << ", " << window.r_max << "] Å" << std::endl;
-                    found = true;
-                    break;
-                }
+        // first wavelength is always a line
+        double line_wave = em_line[l][0];
+        bool found = false;
+        
+        for (size_t w = 0; w < wavelength_windows.size(); w++) {
+            const auto& window = wavelength_windows[w];
+            if (line_wave >= window.r_min && line_wave <= window.r_max) {
+                std::cout << "    Line " << line_wave << " Å: ✓ Found in window " 
+                         << w+1 << " [" << window.r_min << ", " << window.r_max << "] Å" << std::endl;
+                found = true;
+                break;
             }
-            
-            if (!found) {
-                std::cerr << "    Line " << line_wave << " Å: ✗ NOT FOUND in any wavelength window!" << std::endl;
-                all_valid = false;
+        }
+        
+        if (!found) {
+            std::cerr << "    Line " << line_wave << " Å: ✗ NOT FOUND in any wavelength window!" << std::endl;
+            all_valid = false;
+        }
+        
+        // process coupled lines (skip ratios)
+        // format: [main_line, coupled_line1, ratio1, coupled_line2, ratio2, ...]
+        for (size_t i = 1; i < em_line[l].size(); i += 2) {
+            if (i + 1 < em_line[l].size()) {  // make sure we have both line and ratio
+                double coupled_line_wave = em_line[l][i];
+                double ratio = em_line[l][i + 1];
+                
+                // only validate the wavelength, not the ratio
+                found = false;
+                for (size_t w = 0; w < wavelength_windows.size(); w++) {
+                    const auto& window = wavelength_windows[w];
+                    if (coupled_line_wave >= window.r_min && coupled_line_wave <= window.r_max) {
+                        std::cout << "    Line " << coupled_line_wave << " Å: ✓ Found in window " 
+                                 << w+1 << " [" << window.r_min << ", " << window.r_max << "] Å "
+                                 << "(ratio: " << ratio << ")" << std::endl;
+                        found = true;
+                        break;
+                    }
+                }
+                
+                if (!found) {
+                    std::cerr << "    Line " << coupled_line_wave << " Å: ✗ NOT FOUND in any wavelength window!" << std::endl;
+                    all_valid = false;
+                }
             }
         }
     }
@@ -642,7 +682,7 @@ void Data::validate_emission_lines() {
 
 std::vector< std::vector< std::vector<double> > > Data::arr_3d() {
   std::vector< std::vector< std::vector<double> > > arr;
-  // Create 3D array with shape (ni, nj, nr)
+  // create 3D array with shape (ni, nj, nr)
   arr.resize(ni);
   for (int i=0; i<ni; i++) {
     arr[i].resize(nj);
@@ -656,7 +696,7 @@ std::vector< std::vector< std::vector<double> > > Data::arr_3d() {
 
 std::vector< std::vector< std::vector<double> > >
   Data::read_cube (std::string filepath) {
-  // Read data file
+  // read data file
   std::vector< std::vector< std::vector<double> > > cube = arr_3d();
   std::fstream fin(filepath, std::ios::in);
 
@@ -673,25 +713,25 @@ std::vector< std::vector< std::vector<double> > >
 }
 
 void Data::compute_ray_grid() {
-  // Make vectors of the correct size
+  // make vectors of the correct size
   x.assign(ni, std::vector<double>(nj));
   y.assign(ni, std::vector<double>(nj));
 
   for (size_t i=0; i<x.size(); i++) {
     for (size_t j=0; j<x[i].size(); j++) {
       x[i][j] = x_min + (j + 0.5)*dx;
-      y[i][j] = y_min + (i + 0.5)*dy; // Assuming origin=lower
+      y[i][j] = y_min + (i + 0.5)*dy; // assuming origin=lower
     }
   }
 
-  // UPDATED: use the combined wavelength array from all windows
+  // updated: use the combined wavelength array from all windows
   r.assign(nr, 0.0);
   for(size_t k=0; k<r.size(); k++)
-    r[k] = r_full[k];  // Use the combined array from all windows
+    r[k] = r_full[k];  // use the combined array from all windows
 }
 
 void Data::summarise_model() {
-  // Print summarised model to terminal
+  // print summarised model to terminal
   std::string dashline =
     "-----------------------------------------------------------";
 
