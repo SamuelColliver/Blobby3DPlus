@@ -352,10 +352,10 @@ void Data::load(const char* moptions_file) {
       std::cout << "  Y_MAX: " << y_max << std::endl;
       
     } else if (keyword == "WAVE_RANGE") {
-      double r_min_win, r_max_win, spectral_res;
+      double r_min_win, r_max_win, lsf_fwhm;
       int orig_start, orig_end, n_bins_win;
       
-      iss >> r_min_win >> r_max_win >> orig_start >> orig_end >> n_bins_win >> spectral_res;
+      iss >> r_min_win >> r_max_win >> orig_start >> orig_end >> n_bins_win >> lsf_fwhm;
       
       if (iss.fail()) {
         std::cerr << "# ERROR: Invalid wave_range format: " << metadata_line << std::endl;
@@ -389,13 +389,13 @@ void Data::load(const char* moptions_file) {
       window.orig_end_bin = orig_end;
       window.n_bins = n_bins_win;
       window.dr = (r_max_win - r_min_win) / n_bins_win;
-      window.fwhm_lsf = ((r_max_win + r_min_win)/2.0) / spectral_res; // central wavelength over spectral resolution
+      window.fwhm_lsf = lsf_fwhm; 
       
       wavelength_windows.push_back(window);
       
       std::cout << "  WAVE_RANGE: " << r_min_win << " - " << r_max_win << " Å "
                << "(bins " << orig_start << "-" << orig_end << ", n=" << n_bins_win 
-               << ", R=" << spectral_res << ")" << std::endl;
+               << ", LSF FWHM=" << lsf_fwhm << ")" << std::endl;
       
     } else if (!keyword.empty()) {
       std::cerr << "# WARNING: Unknown keyword in metadata: " << keyword << std::endl;

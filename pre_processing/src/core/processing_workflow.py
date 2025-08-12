@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-High-level processing workflow functions that orchestrate the complete pipeline.
+High-level processing workflow functions with FIXED LSF FWHM handling.
 """
 
 import numpy as np
@@ -35,35 +35,7 @@ def process_single_ifs_file(
     remove_invalid_spaxels=True,
     clean_invalid=True
 ):
-    """
-    Process a single IFS FITS file through the complete pipeline.
-    
-    Parameters
-    ----------
-    input_file : str or Path
-        Path to input FITS file
-    pixelscale_arcsec : float
-        Pixel scale in arcseconds per pixel
-    redshift : float
-        Redshift for wavelength correction (z)
-    instrument : str
-        Instrument type ('sami', 'generic')
-    continuum_file : str or Path, optional
-        Path to continuum FITS file
-    continuum_extension : str, optional
-        Extension name for continuum data
-    continuum_method : str
-        Method for continuum subtraction ('nanmedian' or 'file')
-    remove_invalid_spaxels : bool
-        Whether to crop NaN edges
-    clean_invalid : bool
-        Whether to replace NaN/inf values
-    
-    Returns
-    -------
-    dict
-        Processed data result dictionary
-    """
+    """Process a single IFS FITS file through the complete pipeline."""
     print(f"\n{'='*60}")
     print(f"Processing: {input_file}")
     print(f"Instrument: {instrument}")
@@ -148,7 +120,10 @@ def process_windowed_ifs_data(
     emission_lines=None,
     window_size=15.0,
     min_gap=5.0,
-    resolution=None,
+    instrument_resolutions=None,    # new: per-instrument resolutions
+    instrument_ranges=None,         # new: per-instrument wavelength ranges
+    resolution=None,                # single resolution (for backward compatibility)
+    lsf_fwhm=None,                 # single LSF FWHM (for backward compatibility)
     pixelscale_arcsec=0.5,
     redshift=0.0,
     instrument='sami',
@@ -160,51 +135,8 @@ def process_windowed_ifs_data(
     dry_run=False,
     create_plots=True
 ):
-    """
-    Complete workflow for processing IFS data into windowed format for Blobby3D.
-    
-    Parameters
-    ----------
-    input_files : str, Path, or list
-        Input FITS file(s). For multi-arm data, provide list of files.
-    output_dir : str or Path
-        Output directory for processed data
-    emission_lines : dict, optional
-        Dictionary of emission lines {name: wavelength_angstrom}.
-        If None, uses common optical lines.
-    window_size : float
-        Half-width of windows in Angstroms
-    min_gap : float
-        Minimum gap before combining windows (Angstroms)
-    resolution : float or dict, optional
-        Spectral resolution R = λ/Δλ
-    pixelscale_arcsec : float
-        Pixel scale in arcseconds per pixel
-    redshift : float
-        Redshift for wavelength correction
-    instrument : str or list
-        Instrument type(s)
-    continuum_files : str, Path, or list, optional
-        Continuum file(s) corresponding to input_files
-    continuum_extensions : str or list, optional
-        Extension name(s) for continuum data
-    continuum_method : str
-        Continuum subtraction method ('nanmedian' or 'file')
-    remove_invalid_spaxels : bool
-        Whether to crop NaN edges
-    clean_invalid : bool
-        Whether to replace NaN/inf values
-    dry_run : bool
-        If True, only create plots without writing data files
-    create_plots : bool
-        Whether to create diagnostic plots
-    
-    Returns
-    -------
-    dict
-        Processing results and file paths
-    """
-    print("IFS Data Processing Workflow for Blobby3D")
+    """Complete workflow for processing IFS data with per-window LSF FWHM calculation."""
+    print("IFS Data Processing Workflow with Per-Window LSF FWHM")
     print("=" * 60)
     
     # handle single file vs multiple files
@@ -238,6 +170,18 @@ def process_windowed_ifs_data(
     print(f"Window size: ±{window_size} Å")
     print(f"Emission lines: {len(emission_lines)}")
     print(f"Redshift: {redshift}")
+    
+    # print resolution setup
+    if instrument_resolutions and instrument_ranges:
+        print(f"Multi-instrument setup:")
+        for instr in instrument_resolutions:
+            r_min, r_max = instrument_ranges[instr]
+            print(f"  {instr}: R = {instrument_resolutions[instr]}, λ = {r_min}-{r_max} Å")
+    elif resolution is not None:
+        print(f"Single resolution: R = {resolution}")
+    elif lsf_fwhm is not None:
+        print(f"Fixed LSF FWHM: {lsf_fwhm:.3f} Å")
+    
     print(f"Dry run: {dry_run}")
     print()
     
@@ -283,7 +227,24 @@ def process_windowed_ifs_data(
             raise ValueError("No emission lines found within the wavelength range!")
         
         windows = combine_overlapping_windows(windows, min_gap)
-        windows = extract_wavelength_indices(windows, combined_result['wavelengths'], resolution)
+        
+        # prepare multi-instrument setup for LSF FWHM calculation
+        multi_instrument_setup = None
+        if instrument_resolutions and instrument_ranges:
+            multi_instrument_setup = {
+                'resolutions': instrument_resolutions,
+                'wavelength_ranges': instrument_ranges
+            }
+        
+        # extract wavelength indices with per-window LSF FWHM calculation
+        windows = extract_wavelength_indices(
+            windows,
+            combined_result['wavelengths'],
+            multi_instrument_setup=multi_instrument_setup,
+            resolution=resolution,
+            lsf_fwhm=lsf_fwhm,
+            redshift=redshift
+        )
         
         # extract windowed data
         windowed_data, windowed_var = extract_windowed_data(
@@ -322,8 +283,8 @@ def process_windowed_ifs_data(
                 combined_result, windows, output_dir)
             plot_files['summary_plot'] = output_path / 'processing_summary.png'
         
-        # print summary
-        print_processing_summary(individual_results, combined_result, windows, windowed_data)
+        # print summary with per-window LSF FWHM info
+        print_processing_summary_with_per_window_lsf(individual_results, combined_result, windows, windowed_data)
         
         # return results
         results = {
@@ -363,51 +324,34 @@ def process_existing_blobby_data(
     emission_lines=None,
     window_size=15.0,
     min_gap=5.0,
-    resolution=None,
+    lsf_fwhm=None,          # for old format conversion
+    resolution=None,        # for old format conversion  
     dry_run=False,
     create_plots=True,
     convert_old_format=True
 ):
-    """
-    Process existing Blobby3D format data to extract wavelength windows.
+
+    from ..io.blobby_io import (
+        load_blobby_metadata, load_blobby_data_cube, 
+        convert_old_to_new_metadata, write_blobby_data, write_blobby_metadata
+    )
+    from ..processing.windowing import (
+        define_emission_line_windows, filter_windows_by_coverage,
+        combine_overlapping_windows, extract_windowed_data
+    )
     
-    This function is for re-processing already converted Blobby3D data
-    with different windowing parameters. Automatically handles both old
-    and new metadata formats.
-    
-    Parameters
-    ----------
-    input_dir : str or Path
-        Directory containing existing Blobby3D data
-    output_dir : str or Path
-        Output directory for windowed data
-    emission_lines : dict, optional
-        Dictionary of emission lines
-    window_size : float
-        Half-width of windows in Angstroms
-    min_gap : float
-        Minimum gap before combining windows
-    resolution : float, optional
-        Spectral resolution
-    dry_run : bool
-        If True, only create plots without writing files
-    create_plots : bool
-        Whether to create diagnostic plots
-    convert_old_format : bool
-        If True, automatically convert old format metadata to new format
-    
-    Returns
-    -------
-    dict
-        Processing results
-    """
-    from ..io.blobby_io import load_blobby_metadata, load_blobby_data_cube, convert_old_to_new_metadata
-    
-    print("Blobby3D Data Re-windowing Workflow")
-    print("=" * 50)
+    print("Blobby3D Data Re-windowing")
+    print("=" * 60)
     print(f"Input directory: {input_dir}")
     print(f"Output directory: {output_dir}")
     print(f"Window size: ±{window_size} Å")
+    print(f"Minimum gap: {min_gap} Å")
+    
+    if lsf_fwhm is not None:
+        print(f"LSF FWHM (for old format): {lsf_fwhm} Å")
+    elif resolution is not None:
+        print(f"Resolution (for old format): R = {resolution}")
+    
     print(f"Dry run: {dry_run}")
     print()
     
@@ -426,18 +370,40 @@ def process_existing_blobby_data(
     # load existing data and handle format conversion
     metadata = load_blobby_metadata(metadata_file)
     
-    # if old format and conversion enabled, convert to new format
-    if metadata.get('format') == 'old' and convert_old_format and not dry_run:
-        print("\nDetected old format metadata. Converting to new format...")
-        new_metadata_file = convert_old_to_new_metadata(
-            metadata_file, 
-            Path(output_dir) / 'metadata_converted.txt',
-            resolution=resolution
-        )
-        print(f"Converted metadata saved as: {new_metadata_file.name}")
-        if resolution is not None:
-            print(f"Added resolution R = {resolution:.0f} to converted metadata")
+    # FIXED: Handle old format conversion and LSF FWHM assignment
+    conversion_lsf_fwhm = None
+    format_converted = False
     
+    if metadata.get('format') == 'old' and convert_old_format:
+        print("\nDetected old format metadata. Converting...")
+        
+        # calculate LSF FWHM for conversion
+        if lsf_fwhm is not None:
+            conversion_lsf_fwhm = lsf_fwhm
+            print(f"Using provided LSF FWHM: {lsf_fwhm} Å")
+        elif resolution is not None:
+            # calculate LSF FWHM from central wavelength and resolution
+            central_wavelength = (metadata['r_min'] + metadata['r_max']) / 2.0
+            conversion_lsf_fwhm = central_wavelength / resolution
+            print(f"Calculated LSF FWHM: {conversion_lsf_fwhm:.3f} Å (λ={central_wavelength:.1f} Å, R={resolution})")
+        else:
+            print("Warning: No LSF FWHM or resolution provided for old format conversion")
+        
+        # convert metadata to new format (but don't write yet)
+        if not dry_run:
+            new_metadata_file = Path(output_dir) / 'metadata_converted.txt'
+            new_metadata_file.parent.mkdir(parents=True, exist_ok=True)
+            convert_old_to_new_metadata(
+                metadata_file, 
+                new_metadata_file,
+                lsf_fwhm=lsf_fwhm,
+                resolution=resolution
+            )
+            print(f"Converted metadata saved as: {new_metadata_file.name}")
+        
+        format_converted = True
+    
+    # load data
     original_data = load_blobby_data_cube(data_file, metadata)
     
     original_var = None
@@ -468,9 +434,17 @@ def process_existing_blobby_data(
         raise ValueError("No emission lines found within the wavelength range!")
     
     windows = combine_overlapping_windows(windows, min_gap)
-    windows = extract_wavelength_indices(windows, metadata['wavelengths'], resolution)
     
-    # extract windowed data (need to transpose from Blobby format to processing format)
+    # FIXED: Properly assign wavelength indices AND LSF FWHM
+    print(f"\nMapping windows and assigning LSF FWHM...")
+    windows = extract_wavelength_indices_for_existing_data(
+        windows, 
+        metadata['wavelengths'],
+        metadata,
+        conversion_lsf_fwhm
+    )
+    
+    # extract windowed data
     data_for_windowing = original_data.transpose(2, 0, 1)  # (ni, nj, nr) -> (nr, ni, nj)
     var_for_windowing = original_var.transpose(2, 0, 1) if original_var is not None else None
     
@@ -495,6 +469,7 @@ def process_existing_blobby_data(
             'spatial_sampling': (metadata['x_max'] - metadata['x_min']) / metadata['ni']
         }
         
+        # FIXED: Write metadata with LSF FWHM values
         metadata_file_out = write_blobby_metadata(
             coord_info, windows, output_dir,
             windowed_data.shape[0], windowed_data.shape[1])
@@ -506,7 +481,7 @@ def process_existing_blobby_data(
         }
         
         # add converted metadata file if created
-        if metadata.get('format') == 'old' and convert_old_format:
+        if format_converted:
             written_files['converted_metadata_file'] = output_path / 'metadata_converted.txt'
     
     # create plots
@@ -517,30 +492,8 @@ def process_existing_blobby_data(
             original_data, windowed_data, metadata, windows, output_dir)
         plot_files['comparison_plot'] = output_path / 'windowed_data_comparison.png'
     
-    # print summary
-    print(f"\n{'='*60}")
-    print("RE-WINDOWING SUMMARY")
-    print(f"{'='*60}")
-    
-    orig_shape = original_data.shape
-    wind_shape = windowed_data.shape
-    
-    print(f"Original data shape: {orig_shape}")
-    print(f"Windowed data shape: {wind_shape}")
-    print(f"Data reduction: {orig_shape[2]} → {wind_shape[2]} bins ({100*wind_shape[2]/orig_shape[2]:.1f}%)")
-    
-    if metadata.get('format') == 'old':
-        print(f"Metadata format: Old format (converted to new format)")
-    else:
-        print(f"Metadata format: New format")
-    
-    print(f"\nWindow details:")
-    for i, window in enumerate(windows):
-        actual_min = window.get('actual_r_min', window['r_min'])
-        actual_max = window.get('actual_r_max', window['r_max'])
-        n_bins = window.get('n_bins', 0)
-        print(f"  Window {i+1}: {window['name']}")
-        print(f"    {actual_min:.1f} - {actual_max:.1f} Å ({n_bins} bins)")
+    # print summary with per-window LSF FWHM
+    print_rewindowing_summary_with_per_window_lsf(metadata, windows, original_data, windowed_data)
     
     results = {
         'metadata': metadata,
@@ -552,7 +505,8 @@ def process_existing_blobby_data(
         'written_files': written_files,
         'plot_files': plot_files,
         'output_dir': output_path,
-        'format_converted': metadata.get('format') == 'old' and convert_old_format
+        'format_converted': format_converted,
+        'conversion_lsf_fwhm': conversion_lsf_fwhm
     }
     
     if not dry_run:
@@ -564,23 +518,109 @@ def process_existing_blobby_data(
     
     return results
 
-def print_processing_summary(individual_results, combined_result, windows, windowed_data):
-    """
-    Print a comprehensive summary of the processing results.
+
+def extract_wavelength_indices_for_existing_data(windows, wavelengths, metadata, conversion_lsf_fwhm):
+    print(f"Mapping windows and assigning LSF FWHM...")
     
-    Parameters
-    ----------
-    individual_results : list
-        List of individual dataset results
-    combined_result : dict
-        Combined dataset result
-    windows : list
-        List of window dictionaries
-    windowed_data : np.ndarray
-        Final windowed data
-    """
+    # extract wavelength indices first
+    for window in windows:
+        # find closest indices in the wavelength array
+        start_idx = np.argmin(np.abs(wavelengths - window['r_min']))
+        end_idx = np.argmin(np.abs(wavelengths - window['r_max']))
+        
+        if end_idx < start_idx:
+            end_idx = start_idx
+        
+        window['start_idx'] = start_idx
+        window['end_idx'] = end_idx
+        window['n_bins'] = end_idx - start_idx + 1
+        
+        # calculate actual range
+        if start_idx > 0:
+            start_edge = (wavelengths[start_idx-1] + wavelengths[start_idx]) / 2
+        else:
+            start_edge = wavelengths[start_idx] - (wavelengths[1] - wavelengths[0]) / 2
+        
+        if end_idx < len(wavelengths) - 1:
+            end_edge = (wavelengths[end_idx] + wavelengths[end_idx+1]) / 2
+        else:
+            end_edge = wavelengths[end_idx] + (wavelengths[-1] - wavelengths[-2]) / 2
+        
+        window['actual_r_min'] = start_edge
+        window['actual_r_max'] = end_edge
+        window['actual_width'] = window['actual_r_max'] - window['actual_r_min']
+    
+    # FIXED: Assign LSF FWHM based on metadata format and available information
+    if metadata.get('format') == 'new' and 'wavelength_ranges' in metadata:
+        # new format: propagate from existing per-window LSF FWHM
+        assign_lsf_from_existing_metadata(windows, metadata)
+    elif conversion_lsf_fwhm is not None:
+        # old format or explicit conversion: use conversion LSF FWHM for all windows
+        assign_lsf_from_conversion(windows, conversion_lsf_fwhm)
+    else:
+        # no LSF FWHM information available
+        print("Warning: No LSF FWHM information available")
+        for window in windows:
+            window['lsf_fwhm'] = None
+    
+    return windows
+
+
+def assign_lsf_from_existing_metadata(windows, metadata):
+    """Assign LSF FWHM to new windows based on existing metadata with per-window values."""
+    print("Propagating LSF FWHM from existing new-format metadata:")
+    
+    # collect existing LSF FWHM values and their wavelength ranges
+    existing_lsf_data = []
+    for wr in metadata['wavelength_ranges']:
+        if 'lsf_fwhm' in wr and wr['lsf_fwhm'] is not None:
+            central_wave = (wr['r_min'] + wr['r_max']) / 2.0
+            existing_lsf_data.append({
+                'wavelength': central_wave,
+                'lsf_fwhm': wr['lsf_fwhm'],
+                'range': (wr['r_min'], wr['r_max'])
+            })
+    
+    if not existing_lsf_data:
+        print("  Warning: No LSF FWHM values found in existing metadata")
+        for window in windows:
+            window['lsf_fwhm'] = None
+        return
+    
+    print(f"  Found {len(existing_lsf_data)} existing LSF FWHM values:")
+    for data in existing_lsf_data:
+        print(f"    λ={data['wavelength']:.1f} Å: LSF FWHM={data['lsf_fwhm']:.3f} Å")
+    
+    # assign LSF FWHM to new windows based on closest wavelength
+    for window in windows:
+        central_wave = (window['actual_r_min'] + window['actual_r_max']) / 2.0
+        
+        # find the closest existing LSF FWHM value by wavelength
+        distances = [abs(central_wave - data['wavelength']) for data in existing_lsf_data]
+        closest_idx = np.argmin(distances)
+        closest_data = existing_lsf_data[closest_idx]
+        
+        window['lsf_fwhm'] = closest_data['lsf_fwhm']
+        
+        print(f"  {window['name']} (λ={central_wave:.1f} Å): LSF FWHM = {window['lsf_fwhm']:.3f} Å")
+        print(f"    (from existing λ={closest_data['wavelength']:.1f} Å)")
+
+
+def assign_lsf_from_conversion(windows, conversion_lsf_fwhm):
+    """Assign the same conversion LSF FWHM to all new windows."""
+    print(f"Assigning conversion LSF FWHM to all windows:")
+    print(f"  LSF FWHM = {conversion_lsf_fwhm:.3f} Å (from old format conversion)")
+    
+    for window in windows:
+        window['lsf_fwhm'] = conversion_lsf_fwhm
+        central_wave = (window['actual_r_min'] + window['actual_r_max']) / 2.0
+        print(f"  {window['name']} (λ={central_wave:.1f} Å): LSF FWHM = {window['lsf_fwhm']:.3f} Å")
+
+
+def print_processing_summary_with_per_window_lsf(individual_results, combined_result, windows, windowed_data):
+    """Print summary with per-window LSF FWHM information."""
     print("\n" + "="*80)
-    print("PROCESSING SUMMARY")
+    print("PROCESSING SUMMARY (Per-Window LSF FWHM)")
     print("="*80)
     
     # dataset information
@@ -615,8 +655,8 @@ def print_processing_summary(individual_results, combined_result, windows, windo
     print(f"  Y: {coord_info['y_min']:.1f}″ to {coord_info['y_max']:.1f}″")
     print(f"  Pixel scale: {coord_info['spatial_sampling']:.2f} arcsec/pixel")
     
-    # window information
-    print(f"\nWavelength windows: {len(windows)}")
+    # per-window LSF FWHM information
+    print(f"\nWavelength windows with per-window LSF FWHM: {len(windows)}")
     total_coverage = sum(w.get('actual_width', w['width']) for w in windows)
     total_range = combined_waves[-1] - combined_waves[0]
     print(f"  Total coverage: {total_coverage:.1f} Å ({100*total_coverage/total_range:.1f}% of range)")
@@ -625,41 +665,65 @@ def print_processing_summary(individual_results, combined_result, windows, windo
         actual_min = window.get('actual_r_min', window['r_min'])
         actual_max = window.get('actual_r_max', window['r_max'])
         n_bins = window.get('n_bins', 0)
-        resolution = window.get('resolution', 'N/A')
+        lsf_fwhm = window.get('lsf_fwhm', None)
+        instrument = window.get('instrument', 'unknown')
+        resolution = window.get('resolution', None)
+        central_obs = window.get('central_wavelength_observed', None)
         
         print(f"  Window {i+1}: {window['name']}")
-        print(f"    Range: {actual_min:.1f} - {actual_max:.1f} Å ({n_bins} bins)")
-        if resolution != 'N/A':
-            print(f"    Resolution: R = {resolution:.0f}")
+        print(f"    Rest-frame range: {actual_min:.1f} - {actual_max:.1f} Å ({n_bins} bins)")
+        if central_obs is not None:
+            print(f"    Central λ (observed): {central_obs:.1f} Å")
+        if instrument != 'unknown' and resolution is not None:
+            print(f"    Instrument: {instrument} (R = {resolution})")
+        if lsf_fwhm is not None:
+            print(f"    LSF FWHM: {lsf_fwhm:.3f} Å")
+        else:
+            print(f"    LSF FWHM: Not available")
         if 'lines' in window:
             print(f"    Lines: {', '.join(window['lines'])}")
     
     print("="*80)
 
 
+def print_rewindowing_summary_with_per_window_lsf(metadata, windows, original_data, windowed_data):
+    """Print re-windowing summary with per-window LSF FWHM information."""
+    print(f"\n{'='*60}")
+    print("RE-WINDOWING SUMMARY (Per-Window LSF FWHM)")
+    print(f"{'='*60}")
+    
+    orig_shape = original_data.shape
+    wind_shape = windowed_data.shape
+    
+    print(f"Original data shape: {orig_shape}")
+    print(f"Windowed data shape: {wind_shape}")
+    print(f"Data reduction: {orig_shape[2]} → {wind_shape[2]} bins ({100*wind_shape[2]/orig_shape[2]:.1f}%)")
+    
+    if metadata.get('format') == 'old':
+        print(f"Metadata format: Old format (converted to new format)")
+    else:
+        print(f"Metadata format: New format with per-window LSF FWHM")
+    
+    print(f"\nWindow details with LSF FWHM:")
+    for i, window in enumerate(windows):
+        actual_min = window.get('actual_r_min', window['r_min'])
+        actual_max = window.get('actual_r_max', window['r_max'])
+        n_bins = window.get('n_bins', 0)
+        lsf_fwhm = window.get('lsf_fwhm', None)
+        
+        print(f"  Window {i+1}: {window['name']}")
+        print(f"    Range: {actual_min:.1f} - {actual_max:.1f} Å ({n_bins} bins)")
+        if lsf_fwhm is not None:
+            print(f"    LSF FWHM: {lsf_fwhm:.3f} Å")
+        else:
+            print(f"    LSF FWHM: Not available")
+    
+    print("="*60)
+
+
 # convenience functions for common tasks
 def quick_sami_processing(blue_file, red_file, output_dir, redshift=0.0, **kwargs):
-    """
-    Quick function for standard SAMI blue+red processing.
-    
-    Parameters
-    ----------
-    blue_file : str or Path
-        SAMI blue FITS file
-    red_file : str or Path  
-        SAMI red FITS file
-    output_dir : str or Path
-        Output directory
-    redshift : float
-        Target redshift
-    **kwargs
-        Additional arguments passed to process_windowed_ifs_data
-    
-    Returns
-    -------
-    dict
-        Processing results
-    """
+    """Quick function for standard SAMI blue+red processing."""
     return process_windowed_ifs_data(
         input_files=[blue_file, red_file],
         output_dir=output_dir,
@@ -670,311 +734,10 @@ def quick_sami_processing(blue_file, red_file, output_dir, redshift=0.0, **kwarg
 
 
 def quick_single_ifs_processing(fits_file, output_dir, instrument='generic', **kwargs):
-    """
-    Quick function for single IFS file processing.
-    
-    Parameters
-    ----------
-    fits_file : str or Path
-        IFS FITS file
-    output_dir : str or Path
-        Output directory
-    instrument : str
-        Instrument type ('sami', 'generic')
-    **kwargs
-        Additional arguments passed to process_windowed_ifs_data
-    
-    Returns
-    -------
-    dict
-        Processing results
-    """
+    """Quick function for single IFS file processing."""
     return process_windowed_ifs_data(
         input_files=fits_file,
         output_dir=output_dir,
         instrument=instrument,
         **kwargs
     )
-
-
-def batch_process_ifs_data(file_list, output_base_dir, **kwargs):
-    """
-    Process multiple IFS datasets in batch.
-    
-    Parameters
-    ----------
-    file_list : list
-        List of (input_files, output_subdir) tuples
-    output_base_dir : str or Path
-        Base output directory
-    **kwargs
-        Common arguments passed to process_windowed_ifs_data
-    
-    Returns
-    -------
-    list
-        List of processing results for each dataset
-    """
-    results = []
-    base_path = Path(output_base_dir)
-    
-    print(f"Batch processing {len(file_list)} datasets...")
-    
-    for i, (input_files, subdir) in enumerate(file_list):
-        print(f"\n{'='*60}")
-        print(f"Processing dataset {i+1}/{len(file_list)}: {subdir}")
-        print(f"{'='*60}")
-        
-        output_dir = base_path / subdir
-        
-        try:
-            result = process_windowed_ifs_data(
-                input_files=input_files,
-                output_dir=output_dir,
-                **kwargs
-            )
-            results.append(result)
-            print(f"SUCCESS: {subdir}")
-            
-        except Exception as e:
-            print(f"FAILED: {subdir} - {e}")
-            results.append(None)
-    
-    # print batch summary
-    successful = sum(1 for r in results if r is not None)
-    print(f"\n{'='*60}")
-    print(f"BATCH PROCESSING COMPLETE")
-    print(f"{'='*60}")
-    print(f"Successful: {successful}/{len(file_list)}")
-    print(f"Failed: {len(file_list) - successful}/{len(file_list)}")
-    
-    return results
-
-
-def validate_processing_inputs(input_files, continuum_files=None, required_extensions=None):
-    """
-    Validate that all required input files exist before processing.
-    
-    Parameters
-    ----------
-    input_files : str, Path, or list
-        Input FITS files
-    continuum_files : str, Path, or list, optional
-        Continuum FITS files
-    required_extensions : list, optional
-        List of required FITS extensions to check
-    
-    Raises
-    ------
-    FileNotFoundError
-        If any required files are missing
-    ValueError
-        If FITS files are invalid or missing required extensions
-    """
-    from astropy.io import fits
-    
-    # convert to lists
-    if isinstance(input_files, (str, Path)):
-        input_files = [input_files]
-    if continuum_files and isinstance(continuum_files, (str, Path)):
-        continuum_files = [continuum_files]
-    
-    print("Validating input files...")
-    
-    # check input files exist
-    for file_path in input_files:
-        path = Path(file_path)
-        if not path.exists():
-            raise FileNotFoundError(f"Input file not found: {file_path}")
-        print(f"  ✓ {path.name}")
-    
-    # check continuum files if provided
-    if continuum_files:
-        for file_path in continuum_files:
-            path = Path(file_path)
-            if not path.exists():
-                raise FileNotFoundError(f"Continuum file not found: {file_path}")
-            print(f"  ✓ {path.name} (continuum)")
-    
-    # check FITS extensions if specified
-    if required_extensions:
-        for file_path in input_files:
-            try:
-                with fits.open(file_path) as hdul:
-                    available_extensions = [hdu.header.get('EXTNAME', f'HDU{i}') for i, hdu in enumerate(hdul)]
-                    
-                for ext in required_extensions:
-                    if ext not in available_extensions:
-                        print(f"  ⚠ Warning: Extension '{ext}' not found in {Path(file_path).name}")
-                        print(f"    Available: {available_extensions}")
-            except Exception as e:
-                raise ValueError(f"Cannot read FITS file {file_path}: {e}")
-    
-    print("Input validation complete.")
-
-
-def safe_process_with_logging(processing_func, log_file=None, **kwargs):
-    """
-    Wrapper for processing functions with enhanced error handling and logging.
-    
-    Parameters
-    ----------
-    processing_func : callable
-        Processing function to run
-    log_file : str or Path, optional
-        Path to log file for output
-    **kwargs
-        Arguments passed to processing_func
-    
-    Returns
-    -------
-    dict or None
-        Processing results, or None if failed
-    """
-    import sys
-    import traceback
-    from datetime import datetime
-    
-    if log_file:
-        log_path = Path(log_file)
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-    
-    def log_message(message):
-        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        log_msg = f"[{timestamp}] {message}"
-        print(log_msg)
-        if log_file:
-            with open(log_file, 'a') as f:
-                f.write(log_msg + '\n')
-    
-    log_message("Starting IFS processing...")
-    
-    try:
-        # run the processing function
-        result = processing_func(**kwargs)
-        log_message("Processing completed successfully")
-        return result
-        
-    except FileNotFoundError as e:
-        log_message(f"ERROR: File not found - {e}")
-        return None
-        
-    except ValueError as e:
-        log_message(f"ERROR: Invalid input - {e}")
-        return None
-        
-    except Exception as e:
-        log_message(f"ERROR: Processing failed - {e}")
-        log_message("Full traceback:")
-        
-        # log full traceback
-        tb_lines = traceback.format_exception(type(e), e, e.__traceback__)
-        for line in tb_lines:
-            log_message(line.rstrip())
-        
-        return None
-
-
-def get_processing_status(output_dir):
-    """
-    Check the status of processing in an output directory.
-    
-    Parameters
-    ----------
-    output_dir : str or Path
-        Output directory to check
-    
-    Returns
-    -------
-    dict
-        Status information about the processing
-    """
-    output_path = Path(output_dir)
-    
-    status = {
-        'directory_exists': output_path.exists(),
-        'data_file_exists': False,
-        'metadata_file_exists': False,
-        'var_file_exists': False,
-        'weights_file_exists': False,
-        'plots_exist': [],
-        'processing_complete': False
-    }
-    
-    if not output_path.exists():
-        return status
-    
-    # check for required files
-    data_file = output_path / 'data.txt'
-    metadata_file = output_path / 'metadata.txt'
-    var_file = output_path / 'var.txt'
-    weights_file = output_path / 'weights.txt'
-    
-    status['data_file_exists'] = data_file.exists()
-    status['metadata_file_exists'] = metadata_file.exists()
-    status['var_file_exists'] = var_file.exists()
-    status['weights_file_exists'] = weights_file.exists()
-    
-    # check for plots
-    plot_patterns = [
-        'multi_arm_windowed_comparison.png',
-        'processing_summary.png',
-        'windowed_data_comparison.png'
-    ]
-    
-    for pattern in plot_patterns:
-        plot_file = output_path / pattern
-        if plot_file.exists():
-            status['plots_exist'].append(pattern)
-    
-    # determine if processing is complete
-    status['processing_complete'] = (
-        status['data_file_exists'] and 
-        status['metadata_file_exists']
-    )
-    
-    return status
-
-
-def cleanup_processing_outputs(output_dir, keep_plots=True):
-    """
-    Clean up processing outputs, optionally keeping plots.
-    
-    Parameters
-    ----------
-    output_dir : str or Path
-        Output directory to clean
-    keep_plots : bool
-        Whether to keep diagnostic plots
-    
-    Returns
-    -------
-    list
-        List of files that were removed
-    """
-    output_path = Path(output_dir)
-    removed_files = []
-    
-    if not output_path.exists():
-        print(f"Directory does not exist: {output_dir}")
-        return removed_files
-    
-    # files to remove
-    files_to_remove = ['data.txt', 'var.txt', 'weights.txt', 'metadata.txt']
-    
-    if not keep_plots:
-        files_to_remove.extend([
-            'multi_arm_windowed_comparison.png',
-            'processing_summary.png', 
-            'windowed_data_comparison.png'
-        ])
-    
-    for filename in files_to_remove:
-        file_path = output_path / filename
-        if file_path.exists():
-            file_path.unlink()
-            removed_files.append(str(file_path))
-            print(f"Removed: {filename}")
-    
-    print(f"Cleanup complete. Removed {len(removed_files)} files.")
-    return removed_files

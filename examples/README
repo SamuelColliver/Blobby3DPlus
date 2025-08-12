@@ -1,0 +1,16 @@
+# GAMA 485885
+
+This is a set of examples for Blobby3DPlus input data. The data is taken from from the [SAMI Galaxy Survey](https://sami-survey.org/) of [GAMA 485885](http://www.gama-survey.org/dr3/tools/sov.php). And based around the example data from the vanilla Blobby3D
+
+## Key Dirs
+
+485885:  
+Identical data to the example in the Vanilla Blobby3D -> however now features the new updated metadata.txt format.
+
+485885-old-meta:
+Shows the comparison between the old meta data format and the new format.
+Converting from existing Blobby3d data to Plus (without windowing) has never been easier thanks to the /pre_processing/examples/convert_old_metadata.py template.
+
+485885-windowed:
+Shows the example data from vanilla to now have 3 seperate windows -> one around each line
+This can be achieved through the /pre_processing/examples/reprocess_existing_blobby.py template which accepts the old or new metadata type.

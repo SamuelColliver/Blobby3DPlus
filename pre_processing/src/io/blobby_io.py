@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Input/output functions for Blobby3D format data.
+Input/output functions for Blobby3D format data with LSF FWHM support.
 """
 
 import numpy as np
@@ -12,7 +12,7 @@ def load_blobby_metadata(metadata_path):
     Load Blobby3D metadata from file, supporting both old and new formats.
     
     Old format: Single line with 9 values: Ni Nj Nk x_min x_max y_min y_max wave_min wave_max
-    New format: Keyword-value pairs with wave_range specifications
+    New format: Keyword-value pairs with wave_range specifications (now with lsf_fwhm instead of resolution)
     
     Parameters
     ----------
@@ -61,6 +61,7 @@ def _load_old_format_metadata(content):
     Load metadata from old format (single line with 9 values).
     
     Format: Ni Nj Nk x_min x_max y_min y_max wave_min wave_max
+    Note: Old format doesn't have LSF FWHM, so it will be None unless provided during conversion
     """
     lines = [line.strip() for line in content.split('\n') if line.strip() and not line.strip().startswith('#')]
     
@@ -90,7 +91,8 @@ def _load_old_format_metadata(content):
         'r_max': wave_max,
         'start_col': 0,
         'end_col': nk - 1,
-        'n_bins': nk
+        'n_bins': nk,
+        'lsf_fwhm': None  # no lsf_fwhm in old format
     }]
     
     # create wavelength array (bin centres)
@@ -115,13 +117,14 @@ def _load_old_format_metadata(content):
     print(f"  Dimensions: {ni} x {nj} x {nk}")
     print(f"  Spatial bounds: X=[{x_min:.3f}, {x_max:.3f}], Y=[{y_min:.3f}, {y_max:.3f}]")
     print(f"  Wavelength coverage: {wave_min:.2f} - {wave_max:.2f} Å ({nk} bins)")
+    print(f"  LSF FWHM: Not available in old format")
     
     return metadata
 
 
 def _load_new_format_metadata(content):
     """
-    Load metadata from new format (keyword-value pairs with wave_range).
+    Load metadata from new format (keyword-value pairs with wave_range and lsf_fwhm).
     """
     metadata = {}
     wavelength_ranges = []
@@ -164,9 +167,11 @@ def _load_new_format_metadata(content):
                     'end_col': int(parts[4]),
                     'n_bins': int(parts[5])
                 }
-                # optional resolution parameter
+                # check for lsf_fwhm parameter (6th parameter)
                 if len(parts) >= 7:
-                    wave_range['resolution'] = float(parts[6])
+                    wave_range['lsf_fwhm'] = float(parts[6])
+                else:
+                    wave_range['lsf_fwhm'] = None
                 wavelength_ranges.append(wave_range)
     
     # validate required parameters
@@ -198,15 +203,15 @@ def _load_new_format_metadata(content):
     print(f"  Wavelength coverage: {metadata['r_min']:.2f} - {metadata['r_max']:.2f} Å")
     print(f"  Number of ranges: {len(wavelength_ranges)}")
     for i, wr in enumerate(wavelength_ranges):
-        resolution_str = f" (R={wr['resolution']:.0f})" if 'resolution' in wr else ""
-        print(f"    Range {i+1}: {wr['r_min']:.2f} - {wr['r_max']:.2f} Å ({wr['n_bins']} bins){resolution_str}")
+        lsf_str = f" (LSF FWHM={wr['lsf_fwhm']:.3f} Å)" if wr['lsf_fwhm'] is not None else " (No LSF FWHM)"
+        print(f"    Range {i+1}: {wr['r_min']:.2f} - {wr['r_max']:.2f} Å ({wr['n_bins']} bins){lsf_str}")
     
     return metadata
 
 
-def convert_old_to_new_metadata(old_metadata_path, new_metadata_path=None, resolution=None):
+def convert_old_to_new_metadata(old_metadata_path, new_metadata_path=None, lsf_fwhm=None, resolution=None):
     """
-    Convert old format metadata to new format.
+    Convert old format metadata to new format with LSF FWHM.
     
     Parameters
     ----------
@@ -214,8 +219,11 @@ def convert_old_to_new_metadata(old_metadata_path, new_metadata_path=None, resol
         Path to old format metadata.txt file
     new_metadata_path : str or Path, optional
         Path for new format file. If None, adds '_new' suffix to original name.
+    lsf_fwhm : float, optional
+        LSF FWHM in Angstroms to use for the converted metadata
     resolution : float, optional
-        Spectral resolution R = λ/Δλ to add to the wave_range line
+        Spectral resolution R = λ/Δλ. If provided and lsf_fwhm is None,
+        will calculate LSF FWHM = λ_central / R
     
     Returns
     -------
@@ -232,8 +240,6 @@ def convert_old_to_new_metadata(old_metadata_path, new_metadata_path=None, resol
     print(f"Converting metadata format:")
     print(f"  From: {old_path}")
     print(f"  To: {new_path}")
-    if resolution is not None:
-        print(f"  Resolution: R = {resolution:.0f}")
     
     # load old format
     metadata = load_blobby_metadata(old_metadata_path)
@@ -242,14 +248,27 @@ def convert_old_to_new_metadata(old_metadata_path, new_metadata_path=None, resol
         print("  Warning: Input file is already in new format")
         return old_path
     
+    # calculate LSF FWHM if not provided
+    if lsf_fwhm is None and resolution is not None:
+        # calculate central wavelength of the range
+        central_wavelength = (metadata['r_min'] + metadata['r_max']) / 2.0
+        lsf_fwhm = central_wavelength / resolution
+        print(f"  Calculated LSF FWHM: {lsf_fwhm:.3f} Å (λ_central={central_wavelength:.1f} Å, R={resolution:.0f})")
+    elif lsf_fwhm is not None:
+        print(f"  Using provided LSF FWHM: {lsf_fwhm:.3f} Å")
+    else:
+        print("  Warning: No LSF FWHM or resolution provided")
+    
     # write in new format
     print(f"  Writing new format metadata...")
     
     with open(new_path, 'w') as f:
-        f.write("# Blobby3D Metadata File - New Format\n")
+        f.write("# Blobby3D Metadata File - New Format with LSF FWHM\n")
         f.write(f"# Converted from old format: {old_path.name}\n")
+        if lsf_fwhm is not None:
+            f.write(f"# LSF FWHM: {lsf_fwhm:.3f} Å\n")
         if resolution is not None:
-            f.write(f"# Spectral resolution: R = {resolution:.0f}\n")
+            f.write(f"# Original spectral resolution: R = {resolution:.0f}\n")
         f.write("\n")
         
         # spatial dimensions
@@ -264,22 +283,23 @@ def convert_old_to_new_metadata(old_metadata_path, new_metadata_path=None, resol
         wr = metadata['wavelength_ranges'][0]
         wave_range_line = f"wave_range {wr['r_min']:.6f} {wr['r_max']:.6f} {wr['start_col']} {wr['end_col']} {wr['n_bins']}"
         
-        # add resolution if provided
-        if resolution is not None:
-            wave_range_line += f" {resolution:.0f}"
+        # add lsf_fwhm if provided
+        if lsf_fwhm is not None:
+            wave_range_line += f" {lsf_fwhm:.6f}"
         
         wave_range_line += "  # Full wavelength range"
-        if resolution is not None:
-            wave_range_line += f" (R={resolution:.0f})"
+        if lsf_fwhm is not None:
+            wave_range_line += f" (LSF FWHM={lsf_fwhm:.3f} Å)"
         
         f.write(wave_range_line + "\n")
         
         f.write(f"\n# Converted from old format with {metadata['total_bins']} wavelength bins\n")
         f.write(f"# Original range: {metadata['r_min']:.2f} - {metadata['r_max']:.2f} Å\n")
-        if resolution is not None:
-            f.write(f"# Format: wave_range r_min r_max start_bin end_bin n_bins resolution\n")
+        if lsf_fwhm is not None:
+            f.write(f"# Format: wave_range r_min r_max start_bin end_bin n_bins lsf_fwhm\n")
         else:
             f.write(f"# Format: wave_range r_min r_max start_bin end_bin n_bins\n")
+        f.write(f"# LSF FWHM units: Angstroms\n")
     
     print(f"  Conversion complete!")
     return new_path
@@ -364,14 +384,14 @@ def write_blobby_data(windowed_data, windowed_weights, windowed_var, output_dir)
 
 def write_blobby_metadata(coord_info, windows, output_dir, ni, nj):
     """
-    Write Blobby3D metadata file.
+    Write Blobby3D metadata file with LSF FWHM.
     
     Parameters
     ----------
     coord_info : dict
         Coordinate information dictionary
     windows : list
-        List of window dictionaries
+        List of window dictionaries (should contain 'lsf_fwhm' key)
     output_dir : str or Path
         Output directory path
     ni, nj : int
@@ -388,7 +408,7 @@ def write_blobby_metadata(coord_info, windows, output_dir, ni, nj):
     print(f"  Metadata: {metadata_file}")
     
     with open(metadata_file, 'w') as f:
-        f.write("# Blobby3D Metadata File\n")
+        f.write("# Blobby3D Metadata File - New Format with LSF FWHM\n")
         f.write("# Generated by IFS Data Processor\n\n")
         
         # spatial dimensions
@@ -399,16 +419,19 @@ def write_blobby_metadata(coord_info, windows, output_dir, ni, nj):
         f.write(f"y_min {coord_info['y_min']:.6f}\n")
         f.write(f"y_max {coord_info['y_max']:.6f}\n")
         
-        # wavelength windows
+        # wavelength windows with LSF FWHM
         for window in windows:
-            resolution_str = f" {window['resolution']:.0f}" if 'resolution' in window else ""
+            lsf_fwhm_str = f" {window['lsf_fwhm']:.6f}" if 'lsf_fwhm' in window and window['lsf_fwhm'] is not None else ""
             f.write(f"wave_range {window['actual_r_min']:.6f} {window['actual_r_max']:.6f} "
                    f"{window['new_start_bin']} {window['new_end_bin']} {window['n_bins']}"
-                   f"{resolution_str}  # {window['name']}\n")
+                   f"{lsf_fwhm_str}  # {window['name']}")
+            if 'lsf_fwhm' in window and window['lsf_fwhm'] is not None:
+                f.write(f" (LSF FWHM={window['lsf_fwhm']:.3f} Å)")
+            f.write("\n")
         
         f.write(f"\n# Total wavelength bins: {sum(w['n_bins'] for w in windows)}\n")
-        f.write(f"# Format: wave_range r_min r_max start_bin end_bin n_bins [resolution] # name\n")
-        if any('resolution' in w for w in windows):
-            f.write(f"# Resolution format: R = λ/Δλ\n")
+        f.write(f"# Format: wave_range r_min r_max start_bin end_bin n_bins [lsf_fwhm] # name\n")
+        f.write(f"# LSF FWHM units: Angstroms\n")
+        f.write(f"# LSF FWHM = λ_central / R (calculated before redshift correction)\n")
     
     return metadata_file

@@ -7,9 +7,10 @@ x_min -7.500000
 x_max 8.000000
 y_min -6.500000
 y_max 7.000000
-wave_range 6542.924939 6553.575775 0 18 19  # [NII]6548
-wave_range 6557.499768 6568.150604 19 37 19  # H-alpha
-wave_range 6577.680299 6588.331135 38 56 19  # [NII]6583
+# wave_range is in the order of min_wavelength max_wavelength start_bin end_bin num_bin lsf_fwhm
+wave_range 6542.924939 6553.575775 0 18 19 1.61 # [NII]6548
+wave_range 6557.499768 6568.150604 19 37 19 1.61 # H-alpha
+wave_range 6577.680299 6588.331135 38 56 19 1.61 # [NII]6583
 
 # Total wavelength bins: 57
 # Original coverage: 6535.08 - 6595.06 Å

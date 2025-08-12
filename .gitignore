@@ -14,10 +14,10 @@ tests/
 # Ignore particular examples #
 ##############################
 data/
-examples/
+examples/*/
 !examples/485885/
 !examples/485885-windowed/
-!examples/485885-old-meta/
+!examples/485885-oldmeta/
 
 # Data/Results #
 ################
@@ -33,6 +33,7 @@ examples/
 !var.txt
 !data.txt
 !metadata.txt
+!metadata_new.txt
 
 # Temporary Files #
 ###################
