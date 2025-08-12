@@ -135,19 +135,19 @@ def read_sami_fits(filename):
                 ext_name = hdu.header.get('EXTNAME', '').upper()
                 
                 # look for data extension (usually first 3D extension or named DATA)
-                if data_ext is None and ('PRIMARY' in ext_name):
+                if data_ext is None and ('PRIMARY' == ext_name):
                     data_ext = i
-                    print(f"  -> Found data in extension {i}")
+                    print(f"  -> Found data at extension {i}")
                 
                 # look for weights extension
-                elif 'WEIGHT' in ext_name:
+                elif 'WEIGHT' == ext_name:
                     weights_ext = i
-                    print(f"  -> Found weights in extension {i}")
+                    print(f"  -> Found weights at extension {i}")
                 
                 # look for variance extension
-                elif 'VARIANCE' in ext_name:
+                elif 'VARIANCE' == ext_name:
                     var_ext = i
-                    print(f"  -> Found variance in extension {i}")
+                    print(f"  -> Found variance at extension {i}")
         
         # if data_ext is still None, use first 3D extension
         if data_ext is None:
