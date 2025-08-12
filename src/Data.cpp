@@ -352,14 +352,14 @@ void Data::load(const char* moptions_file) {
       std::cout << "  Y_MAX: " << y_max << std::endl;
       
     } else if (keyword == "WAVE_RANGE") {
-      double r_min_win, r_max_win;
+      double r_min_win, r_max_win, spectral_res;
       int orig_start, orig_end, n_bins_win;
       
-      iss >> r_min_win >> r_max_win >> orig_start >> orig_end >> n_bins_win;
+      iss >> r_min_win >> r_max_win >> orig_start >> orig_end >> n_bins_win >> spectral_res;
       
       if (iss.fail()) {
         std::cerr << "# ERROR: Invalid wave_range format: " << metadata_line << std::endl;
-        std::cerr << "Expected: wave_range <min> <max> <start_bin> <end_bin> <n_bins>" << std::endl;
+        std::cerr << "Expected: wave_range <min> <max> <start_bin> <end_bin> <n_bins> <resolution>" << std::endl;
         exit(1);
       }
       
@@ -389,11 +389,13 @@ void Data::load(const char* moptions_file) {
       window.orig_end_bin = orig_end;
       window.n_bins = n_bins_win;
       window.dr = (r_max_win - r_min_win) / n_bins_win;
+      window.fwhm_lsf = ((r_max_win + r_min_win)/2.0) / spectral_res; // central wavelength over spectral resolution
       
       wavelength_windows.push_back(window);
       
       std::cout << "  WAVE_RANGE: " << r_min_win << " - " << r_max_win << " Å "
-               << "(bins " << orig_start << "-" << orig_end << ", n=" << n_bins_win << ")" << std::endl;
+               << "(bins " << orig_start << "-" << orig_end << ", n=" << n_bins_win 
+               << ", R=" << spectral_res << ")" << std::endl;
       
     } else if (!keyword.empty()) {
       std::cerr << "# WARNING: Unknown keyword in metadata: " << keyword << std::endl;
@@ -563,7 +565,7 @@ void Data::process_wavelength_windows() {
         
         std::cout << "  Window " << w+1 << ": [" << window.r_min << ", " 
                  << window.r_max << "] Å (" << window.n_bins << " bins, " 
-                 << "dr=" << window.dr << " Å/bin)" << std::endl;
+                 << "dr=" << window.dr << " Å/bin, LSF_FWHM=" << window.fwhm_lsf << " Å)" << std::endl;
     }
     
     nr = total_wavelength_bins;
@@ -757,7 +759,7 @@ void Data::summarise_model() {
   for (size_t w = 0; w < wavelength_windows.size(); w++) {
     const auto& window = wavelength_windows[w];
     std::cout<<"  Window "<<w+1<<": "<<window.r_min<<" - "<<window.r_max<<" Å ("
-             <<window.n_bins<<" bins)"<<std::endl;
+             <<window.n_bins<<" bins, R="<<((window.r_min + window.r_max)/2.0)/window.fwhm_lsf<<")"<<std::endl;
   }
   std::cout<<"Total wavelength bins: "<<nr<<std::endl;
 

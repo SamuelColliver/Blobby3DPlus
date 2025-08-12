@@ -514,9 +514,8 @@ void DiscModel::construct_cube() {
 void DiscModel::construct_line_cube(
   double line, double factor, std::vector< std::vector<double> >& flux_map) {
   
-  const double sigma_lsfsq = pow(Data::get_instance().get_lsf_sigma(), 2);
   const std::vector<Data::WavelengthWindow>& windows = Data::get_instance().get_wavelength_windows();
-  const int nr = Data::get_instance().get_nr();  // add explicit nr definition
+  const int nr = Data::get_instance().get_nr();
   
   // find which window contains this line
   int target_window = -1;
@@ -534,6 +533,9 @@ void DiscModel::construct_line_cube(
   }
   
   const auto& window = windows[target_window];
+  
+  // use window-specific LSF FWHM instead of global lsf_sigma
+  double sigma_lsfsq = pow(window.fwhm_lsf / sqrt(8.0 * log(2.0)), 2);
   
   double lambda, sigma_lambda, invtwo_wlsq;
   double ha_cdf_min, ha_cdf_max;

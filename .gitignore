@@ -13,9 +13,11 @@ tests/
 
 # Ignore particular examples #
 ##############################
+data/
 examples/
 !examples/485885/
 !examples/485885-windowed/
+!examples/485885-old-meta/
 
 # Data/Results #
 ################

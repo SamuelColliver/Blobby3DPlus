@@ -90,6 +90,7 @@ class Data
     int orig_start_bin, orig_end_bin;  // original bin indices from preprocessing
     std::vector<double> r;         // wavelength values
     double dr;                     // wavelength resolution for this window
+    double fwhm_lsf;                // FWHM of line spread function for this window
   };
   private:
   std::vector<WavelengthWindow> wavelength_windows;

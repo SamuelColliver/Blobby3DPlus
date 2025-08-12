@@ -1,0 +1,236 @@
+# IFS Data Processing Pipeline for Blobby3D
+
+A modular Python pipeline for processing Integral Field Spectroscopy (IFS) data from various instruments into Blobby3D format with emission line windowing.
+
+## Features
+
+- **Multi-instrument support**: SAMI, generic IFS formats
+- **Multi-arm data combination**: Automatically combines blue/red arms with spatial alignment
+- **Flexible continuum subtraction**: File-based or nanmedian methods
+- **Emission line windowing**: Automatic windowing around specified emission lines
+- **Data cleaning**: NaN edge cropping, invalid value handling
+- **Comprehensive visualisation**: Diagnostic plots for all processing steps
+- **Dry-run capability**: Preview processing without writing files
+- **Modular design**: Reusable functions for custom workflows
+
+## Directory Structure
+
+```
+├── src/                          # Main source code
+│   ├── __init__.py              # Package imports
+│   ├── core/
+│   │   └── processing_workflow.py   # High-level workflow functions
+│   ├── io/
+│   │   ├── fits_readers.py          # FITS file readers for different instruments
+│   │   └── blobby_io.py            # Blobby3D format I/O
+│   ├── processing/
+│   │   ├── spectral_processing.py   # Spectral operations (redshift, continuum)
+│   │   ├── windowing.py            # Emission line windowing
+│   │   └── data_combination.py     # Multi-arm data combination
+│   └── visualization/
+│       └── plotting.py             # Diagnostic plots
+└── examples/                     # Example usage scripts
+    ├── process_sami_combined.py     # SAMI blue+red processing
+    ├── process_single_fits.py       # Single IFS file processing
+    ├── reprocess_existing_blobby.py # Re-window existing Blobby3D data
+    └── compare_sami_continuum.py    # Compare raw vs processed data
+```
+
+## Quick Start
+
+### 1. Process SAMI Blue+Red Data
+
+```python
+from src import process_windowed_ifs_data
+
+# Define input files and parameters
+results = process_windowed_ifs_data(
+    input_files=['blue.fits', 'red.fits'],
+    output_dir='output/',
+    emission_lines={'H-alpha': 6562.81, '[NII]6583': 6583.1},
+    window_size=15.0,  # ±15 Å windows
+    redshift=0.043,
+    instrument=['sami', 'sami'],
+    continuum_method='nanmedian',
+    dry_run=False,
+    create_plots=True
+)
+```
+
+### 2. Process Single IFS File
+
+```python
+results = process_windowed_ifs_data(
+    input_files='data.fits',
+    output_dir='output/',
+    emission_lines={'H-alpha': 6562.81},
+    instrument='generic',
+    pixelscale_arcsec=0.2
+)
+```
+
+### 3. Re-process Existing Blobby3D Data
+
+```python
+from src import process_existing_blobby_data
+
+results = process_existing_blobby_data(
+    input_dir='existing_blobby_data/',
+    output_dir='rewindowed_output/',
+    window_size=5.0,  # Smaller windows
+    min_gap=0.0       # Don't combine windows
+)
+```
+
+## Configuration Options
+
+### Processing Parameters
+
+- `pixelscale_arcsec`: Spatial pixel scale (arcsec/pixel)
+- `redshift`: Target redshift for wavelength correction
+- `window_size`: Half-width of emission line windows (Å)
+- `min_gap`: Minimum gap before combining overlapping windows (Å)
+- `resolution`: Spectral resolution R = λ/Δλ
+
+### Continuum Subtraction
+
+- `continuum_method='nanmedian'`: Use median across wavelength axis
+- `continuum_method='file'`: Use external continuum file
+- `continuum_files`: Path(s) to continuum FITS files
+- `continuum_extensions`: Extension names for continuum data
+
+### Data Cleaning
+
+- `remove_invalid_spaxels=True`: Crop NaN edges
+- `clean_invalid=True`: Replace NaN/infinity values
+- `nan_replacement=0.0`: Value to replace NaN with
+- `inf_replacement=1e20`: Value to replace infinity with
+
+### Output Options
+
+- `dry_run=True`: Create plots only, don't write data files
+- `create_plots=True`: Generate diagnostic plots
+- `output_dir`: Directory for output files
+
+## Emission Lines
+
+Pre-defined common emission lines are available:
+
+```python
+from src.processing.windowing import COMMON_EMISSION_LINES
+
+# Includes: [OII], H-beta, [OIII], H-alpha, [NII], [SII], etc.
+```
+
+Or define custom lines:
+
+```python
+emission_lines = {
+    'H-alpha': 6562.81,
+    '[NII]6548': 6548.1,
+    '[NII]6583': 6583.1,
+    '[SII]6717': 6716.4,
+    '[SII]6731': 6730.8
+}
+```
+
+## Output Files
+
+### Blobby3D Format Files
+
+- `data.txt`: Flux data in flattened format
+- `var.txt`: Variance data (if available)
+- `weights.txt`: Weight data (if available)
+- `metadata.txt`: Spatial and wavelength information
+
+### Diagnostic Plots
+
+- `multi_arm_windowed_comparison.png`: Blue/red/combined/windowed comparison
+- `processing_summary.png`: Flux maps, spectra, S/N ratios
+- `windowed_data_comparison.png`: Original vs windowed data
+
+## Example Usage
+
+See the `examples/` directory for complete working examples:
+
+- **`process_sami_combined.py`**: Process SAMI blue+red arms with continuum subtraction
+- **`process_single_fits.py`**: Process single IFS file (any instrument)
+- **`reprocess_existing_blobby.py`**: Re-window existing Blobby3D data
+- **`compare_sami_continuum.py`**: Compare raw vs processed SAMI data
+
+## Supported Instruments
+
+### SAMI (current)
+- Automatic detection of data/weights/variance extensions
+- Blue/red arm combination with spatial alignment
+- Built-in wavelength solutions
+
+### Generic IFS (extensible)
+- Standard FITS cube format
+- Configurable data extensions
+- WCS wavelength support
+
+### Adding New Instruments
+
+To add support for a new instrument:
+
+1. Create a reader function in `src/io/fits_readers.py`
+2. Follow the pattern of `read_sami_fits()` 
+3. Return: `(data, weights, variance, header, wavelengths)`
+4. Add instrument option to workflow functions
+
+## Advanced Usage
+
+### Custom Processing Workflow
+
+```python
+from src.core.processing_workflow import process_single_ifs_file
+from src.processing.windowing import define_emission_line_windows
+from src.io.blobby_io import write_blobby_data
+
+# Process individual components
+result = process_single_ifs_file('data.fits', redshift=0.05)
+
+# Custom windowing
+windows = define_emission_line_windows({'H-alpha': 6562.81}, window_size=10)
+# ... additional custom processing
+
+# Write output
+write_blobby_data(windowed_data, None, windowed_var, 'output/')
+```
+
+### Multi-step Processing
+
+```python
+from src.processing.data_combination import combine_multi_arm_data
+from src.visualization.plotting import create_multi_arm_comparison_plot
+
+# Process arms separately
+blue_result = process_single_ifs_file('blue.fits')
+red_result = process_single_ifs_file('red.fits')
+
+# Combine with custom parameters
+combined = combine_multi_arm_data(blue_result, red_result)
+
+# Create custom visualizations
+fig = create_multi_arm_comparison_plot([blue_result, red_result], combined, ...)
+```
+
+## Dependencies
+
+- `numpy`: Array operations
+- `astropy`: FITS file handling
+- `matplotlib`: Plotting
+- `pathlib`: File path handling
+- `warnings`: FITS warning suppression
+
+## Development
+
+The pipeline is designed to be modular and extensible:
+
+- **Core functions** are in `src/core/`
+- **I/O operations** are in `src/io/`
+- **Processing algorithms** are in `src/processing/`
+- **Visualization tools** are in `src/visualization/`
+
+Each module can be used independently or as part of the complete workflow.

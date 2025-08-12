@@ -1,4 +1,3 @@
-
 """Fitting kinematic moments with multi-window support.
 
 @original author: Mathew Varidel
@@ -14,15 +13,18 @@ from .const import PhysicalConstants
 
 class SpectralModel:
 
-    def __init__(self, lines, lsf_fwhm, baseline_order=None, wave_ref=0.0, 
+    def __init__(self, lines, lsf_fwhm=None, baseline_order=None, wave_ref=0.0, 
                  wavelength_windows=None):
         """
         Parameters
         ----------
         lines : list of lists
             Emission line definitions.
-        lsf_fwhm : float
-            Full-Width Half Maximum of Line Spread Function.
+        lsf_fwhm : float or dict, optional
+            Full-Width Half Maximum of Line Spread Function. Can be:
+            - float: single LSF FWHM for all wavelengths
+            - dict: mapping of window_idx to LSF FWHM values
+            - None: will be extracted from wavelength_windows if available
         baseline_order : int, optional
             Order of baseline polynomial. The default is None.
         wave_ref : float, optional
@@ -39,16 +41,58 @@ class SpectralModel:
         self.nlines = len(lines)
         self.wavelength_windows = wavelength_windows
 
-        self.lsf_fwhm = lsf_fwhm
-        self.lsf_sigma = lsf_fwhm/np.sqrt(8.0*np.log(2.0))
+        # Handle LSF FWHM - support both single value and per-window values
+        if wavelength_windows is not None:
+            if lsf_fwhm is None:
+                # Extract LSF FWHM from wavelength windows
+                self.lsf_fwhm_map = {}
+                self.lsf_sigma_map = {}
+                for i, window in enumerate(wavelength_windows):
+                    if hasattr(window, 'fwhm_lsf'):
+                        self.lsf_fwhm_map[i] = window.fwhm_lsf
+                        self.lsf_sigma_map[i] = window.fwhm_lsf / np.sqrt(8.0 * np.log(2.0))
+                    else:
+                        # Fallback for windows without LSF info
+                        self.lsf_fwhm_map[i] = 2.0  # Default value
+                        self.lsf_sigma_map[i] = 2.0 / np.sqrt(8.0 * np.log(2.0))
+            elif isinstance(lsf_fwhm, dict):
+                # User-provided per-window LSF values
+                self.lsf_fwhm_map = lsf_fwhm.copy()
+                self.lsf_sigma_map = {k: v/np.sqrt(8.0*np.log(2.0)) for k, v in lsf_fwhm.items()}
+            else:
+                # Single LSF value for all windows
+                self.lsf_fwhm_map = {i: lsf_fwhm for i in range(len(wavelength_windows))}
+                self.lsf_sigma_map = {i: lsf_fwhm/np.sqrt(8.0*np.log(2.0)) for i in range(len(wavelength_windows))}
+            
+            # For backwards compatibility
+            self.lsf_fwhm = lsf_fwhm if isinstance(lsf_fwhm, (int, float)) else list(self.lsf_fwhm_map.values())[0]
+            self.lsf_sigma = self.lsf_fwhm / np.sqrt(8.0*np.log(2.0))
+        else:
+            # Single window case
+            self.lsf_fwhm = lsf_fwhm if lsf_fwhm is not None else 2.0
+            self.lsf_sigma = self.lsf_fwhm / np.sqrt(8.0*np.log(2.0))
+            self.lsf_fwhm_map = {0: self.lsf_fwhm}
+            self.lsf_sigma_map = {0: self.lsf_sigma}
 
         self.baseline_order = baseline_order
-
         self.wave_ref = wave_ref
 
         self.nparam = self.nlines + 2
         if self.baseline_order is not None:
             self.nparam += 1 + self.baseline_order
+
+    def get_lsf_sigma_for_wavelength(self, wavelength):
+        """Get LSF sigma for a specific wavelength."""
+        if self.wavelength_windows is None:
+            return self.lsf_sigma
+        
+        # Find which window contains this wavelength
+        for i, window in enumerate(self.wavelength_windows):
+            if window.r_min <= wavelength <= window.r_max:
+                return self.lsf_sigma_map.get(i, self.lsf_sigma)
+        
+        # Fallback to default if wavelength not in any window
+        return self.lsf_sigma
 
     def calculate(self, wave, *param):
         """Calculate spectral model.
@@ -304,7 +348,16 @@ class SpectralModel:
         -------
         guess : np.ndarray
         """
-        dwave = np.median(np.diff(wave))
+        if len(wave) <= 1 or len(data) <= 1:
+            # Handle edge case of insufficient data
+            if self.baseline_order is None:
+                guess = np.zeros(self.nlines + 2)
+            else:
+                guess = np.zeros(self.nlines + 2 + self.baseline_order + 1)
+            guess[self.nlines+1] = 50.0  # Default velocity dispersion
+            return guess
+        
+        dwave = np.median(np.diff(wave)) if len(wave) > 1 else 1.0
         wave_left = wave - 0.5*dwave
         wave_right = wave + 0.5*dwave
 
@@ -316,8 +369,17 @@ class SpectralModel:
         tmp_v = np.zeros(self.nlines)*np.nan
         tmp_vdisp = np.ones(self.nlines)*np.nan
 
+        # Check if data has any useful signal
+        data_max = np.nanmax(data)
+        data_min = np.nanmin(data)
+        if data_max <= data_min or np.all(np.isnan(data)) or np.all(data <= 0):
+            # No useful signal - return defaults
+            guess[self.nlines] = 0.0  # velocity
+            guess[self.nlines+1] = 50.0  # velocity dispersion
+            return guess
+
         for i, line in enumerate(self.lines):
-            # Check if line is within the wavelength range
+            # Check if line is within the wavelength range (with some tolerance)
             if wave.min() > line[0] + lambda_win or wave.max() < line[0] - lambda_win:
                 # Line is completely outside wavelength range
                 continue
@@ -334,46 +396,104 @@ class SpectralModel:
             win_data = data[win]
             win_wave = wave[win]
 
-            # Guess flux
-            guess[i] = max(0.0, win_data.sum() * dwave)
-
-            # Calculate weights by normalising to minimum flux in array
-            weights_v = win_data - np.min(win_data)
-            if np.all(weights_v == 0.0):
-                weights_v = np.ones(weights_v.shape)
-
-            mean_wave = np.average(win_wave, weights=weights_v)
-            tmp_v[i] = (mean_wave/line[0] - 1.0)*PhysicalConstants.C
-
-            # Calculate velocity dispersion guess
-            weights_vdisp = win_data.copy()
-            weights_vdisp[win_data <= 0.0] = 0.0
-            var_wave = np.average((win_wave - mean_wave)**2, weights=weights_vdisp)
-            var_wave = var_wave - self.lsf_sigma**2
-            tmp_vdisp[i] = max(1e-9, np.sqrt(max(0, var_wave)))
-            tmp_vdisp[i] *= PhysicalConstants.C/line[0]
-
-        # Use weighted averages for velocity and dispersion
-        valid_flux = guess[:self.nlines] > 0
-        if np.any(valid_flux):
-            weights = guess[:self.nlines]
-            weights = np.where(valid_flux, weights, 0)
+            # Skip if all data in window is NaN, zero, or negative
+            finite_mask = np.isfinite(win_data)
+            if not np.any(finite_mask):
+                continue
+                
+            win_data_clean = win_data[finite_mask]
+            win_wave_clean = win_wave[finite_mask]
             
-            if np.sum(weights) > 0:
-                guess[self.nlines] = np.average(tmp_v, weights=weights)
-                guess[self.nlines+1] = np.average(tmp_vdisp, weights=weights)
+            if len(win_data_clean) == 0 or np.all(win_data_clean <= 0):
+                continue
+
+            # Guess flux (use only positive values)
+            positive_data = win_data_clean[win_data_clean > 0]
+            if len(positive_data) > 0:
+                guess[i] = max(0.0, positive_data.sum() * dwave)
+            else:
+                continue
+
+            # Calculate weights for velocity - normalize to prevent zero weights
+            data_range = np.max(win_data_clean) - np.min(win_data_clean)
+            if data_range > 0:
+                weights_v = win_data_clean - np.min(win_data_clean)
+                weights_v = np.maximum(weights_v, 1e-10)  # Prevent exactly zero weights
+            else:
+                weights_v = np.ones(len(win_data_clean))
+
+            if np.sum(weights_v) > 0:
+                try:
+                    mean_wave = np.average(win_wave_clean, weights=weights_v)
+                    tmp_v[i] = (mean_wave/line[0] - 1.0)*PhysicalConstants.C
+                except (ZeroDivisionError, ValueError):
+                    tmp_v[i] = 0.0
+            else:
+                tmp_v[i] = 0.0
+
+            # Calculate velocity dispersion guess - use window-specific LSF
+            lsf_sigma_for_line = self.get_lsf_sigma_for_wavelength(line[0])
+            
+            # Use only positive data for velocity dispersion weights
+            weights_vdisp = np.maximum(win_data_clean, 0.0)
+            
+            if np.sum(weights_vdisp) > 0 and not np.isnan(mean_wave):
+                try:
+                    var_wave = np.average((win_wave_clean - mean_wave)**2, weights=weights_vdisp)
+                    var_wave = max(0, var_wave - lsf_sigma_for_line**2)
+                    tmp_vdisp[i] = max(1.0, np.sqrt(var_wave) * PhysicalConstants.C / line[0])
+                except (ZeroDivisionError, ValueError, RuntimeWarning):
+                    tmp_vdisp[i] = 50.0  # Default 50 km/s
+            else:
+                tmp_vdisp[i] = 50.0  # Default 50 km/s
+
+        # Use weighted averages for velocity and dispersion with better error handling
+        valid_flux = (guess[:self.nlines] > 0) & np.isfinite(guess[:self.nlines])
+        valid_v = np.isfinite(tmp_v)
+        valid_vdisp = np.isfinite(tmp_vdisp) & (tmp_vdisp > 0)
+        
+        # Velocity estimate
+        if np.any(valid_flux & valid_v):
+            weights = guess[:self.nlines]
+            mask = valid_flux & valid_v
+            weights_masked = weights[mask]
+            values_masked = tmp_v[mask]
+            
+            if np.sum(weights_masked) > 0:
+                try:
+                    guess[self.nlines] = np.average(values_masked, weights=weights_masked)
+                except (ZeroDivisionError, ValueError):
+                    guess[self.nlines] = 0.0
             else:
                 guess[self.nlines] = 0.0
-                guess[self.nlines+1] = 50.0  # Default velocity dispersion
         else:
             guess[self.nlines] = 0.0
+            
+        # Velocity dispersion estimate
+        if np.any(valid_flux & valid_vdisp):
+            weights = guess[:self.nlines]
+            mask = valid_flux & valid_vdisp
+            weights_masked = weights[mask]
+            values_masked = tmp_vdisp[mask]
+            
+            if np.sum(weights_masked) > 0:
+                try:
+                    guess[self.nlines+1] = np.average(values_masked, weights=weights_masked)
+                except (ZeroDivisionError, ValueError):
+                    guess[self.nlines+1] = 50.0
+            else:
+                guess[self.nlines+1] = 50.0
+        else:
             guess[self.nlines+1] = 50.0
 
-        # Handle NaN values
+        # Handle any remaining NaN values and ensure reasonable bounds
         guess = np.nan_to_num(guess, nan=0.0, posinf=1e6, neginf=-1e6)
         
-        # Ensure velocity dispersion is positive
-        guess[self.nlines+1] = max(1.0, guess[self.nlines+1])
+        # Ensure velocity dispersion is positive and reasonable (1-500 km/s)
+        guess[self.nlines+1] = max(1.0, min(500.0, guess[self.nlines+1]))
+        
+        # Ensure velocity is reasonable (-1000 to 1000 km/s)
+        guess[self.nlines] = max(-1000.0, min(1000.0, guess[self.nlines]))
 
         return guess
 
@@ -404,7 +524,7 @@ class SpectralModel:
             lam = rel_lambda*line_wave
             lam_sigma = rel_lambda_sigma*line_wave
 
-            model += self._gas_line_model(wave, line_flux, lam, lam_sigma)
+            model += self._gas_line_model(wave, line_flux, lam, lam_sigma, line_wave)
 
             # Add coupled lines
             nclines = len(line)//2
@@ -414,11 +534,11 @@ class SpectralModel:
                 lam = rel_lambda*line_wave
                 lam_sigma = rel_lambda_sigma*line_wave
                 model += self._gas_line_model(
-                    wave, factor*line_flux, lam, lam_sigma)
+                    wave, factor*line_flux, lam, lam_sigma, line_wave)
 
         return model
 
-    def _gas_line_model(self, wave, flux, lam, lam_sigma):
+    def _gas_line_model(self, wave, flux, lam, lam_sigma, line_wave_rest):
         """Gas emission line model.
 
         Parameters
@@ -431,11 +551,16 @@ class SpectralModel:
             Line wavelength.
         lam_sigma : float
             Line standard deviation.
+        line_wave_rest : float
+            Rest wavelength of the line (for LSF lookup).
 
         Returns
         -------
         gas_line_model : np.ndarray
         """
+        # Get window-specific LSF sigma for this line
+        lsf_sigma = self.get_lsf_sigma_for_wavelength(line_wave_rest)
+        
         # Handle potential irregular wavelength spacing
         if len(wave) == 1:
             dwave = 1.0  # Single wavelength point
@@ -462,7 +587,7 @@ class SpectralModel:
         wave_left = wave - 0.5*dwave
         wave_right = wave + 0.5*dwave
 
-        var = lam_sigma**2 + self.lsf_sigma**2
+        var = lam_sigma**2 + lsf_sigma**2
 
         cdf_left = 0.5*erf((wave_left - lam)/np.sqrt(2.0*var))
         cdf_right = 0.5*erf((wave_right - lam)/np.sqrt(2.0*var))

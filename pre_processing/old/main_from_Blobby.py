@@ -1,10 +1,7 @@
 #!/usr/bin/env python3
 """
-Blobby3D Multi-Window Data Trimmer (for the example data [or at least working Blobby3D data**])
-
-** that has used the new metadata.txt format
-
-This script processes Blobby3D data to extract multiple wavelength windows around
+Blobby3D Multi-Window Data Trimmer 
+This example script processes exisitng Blobby3D data to extract multiple wavelength windows around
 emission lines, combines overlapping windows, and updates metadata accordingly.
 
 TODO::
@@ -482,8 +479,8 @@ def main():
     
     # +++++++++++++ Can be Edited +++++++++++++++++
 
-    input_dir = './examples/65410'
-    output_dir = './examples/65410-windowed'
+    input_dir = '../examples/65410'
+    output_dir = input_dir + '-windowed'
 
     window_size = 5.0   # size (radius; Angstrom) of the window 
                         #(ie. 8 Angstrom = 16 total)
@@ -492,6 +489,10 @@ def main():
                         #(ie. min_gap = 5 then windows that are only 5 Ang apart will be combined)
 
     create_plots = True # set to False to skip plotting
+
+    telescope_res = 4900
+
+    ## TODO :: ADD DRY RUN -> just plots
     
     # common emission lines (wavelength in Angstroms)
     emission_lines = {
