@@ -515,6 +515,7 @@ void DiscModel::construct_line_cube(
   double line, double factor, std::vector< std::vector<double> >& flux_map) {
   
   const std::vector<Data::WavelengthWindow>& windows = Data::get_instance().get_wavelength_windows();
+  const std::vector<double>& r_full = Data::get_instance().get_r_full();  // ← Add this line
   const int nr = Data::get_instance().get_nr();
   
   // find which window contains this line
@@ -559,8 +560,10 @@ void DiscModel::construct_line_cube(
           continue;
         }
         
-        double wave_center = window.r[local_r];
+        // Use the global wavelength array instead of window-specific array
+        double wave_center = r_full[global_r];
         
+        // Use window-specific dr for bin width
         ha_cdf_min = LookupErf::evaluate((wave_center - 0.5*window.dr - lambda) * invtwo_wlsq);
         ha_cdf_max = LookupErf::evaluate((wave_center + 0.5*window.dr - lambda) * invtwo_wlsq);
         

@@ -17,27 +17,29 @@ def main():
     
     # +++++++++++++ Configuration - Edit This Section +++++++++++++++++
     
+    
+
     # input files
     input_files = [
-        '/Users/scol0322/Documents/sami_data/65410_blue_7_Y13SAR1_P003_15T008_2013_03_05-2013_03_17.fits',
-        '/Users/scol0322/Documents/sami_data/65410_red_7_Y13SAR1_P003_15T008_2013_03_05-2013_03_17.fits'
+        '/Users/scol0322/Documents/raw-data/485885/485885_blue_8_Y13SAR1_P007_15T010_2013_03_05-2013_03_17.fits',
+        '/Users/scol0322/Documents/raw-data/485885/485885_red_8_Y13SAR1_P007_15T010_2013_03_05-2013_03_17.fits'
     ]
     
     # continuum files (optional - set to None to use nanmedian)
     continuum_files = [
-        '/Users/scol0322/Documents/sami_data/65410_7_Y13SAR1_P003_15T008_2013_03_05-2013_03_17_1_comp.fits',
-        '/Users/scol0322/Documents/sami_data/65410_7_Y13SAR1_P003_15T008_2013_03_05-2013_03_17_1_comp.fits'
+        '/Users/scol0322/Documents/raw-data/485885/485885_8_Y13SAR1_P007_15T010_2013_03_05-2013_03_17_1_comp.fits',
+        '/Users/scol0322/Documents/raw-data/485885/485885_8_Y13SAR1_P007_15T010_2013_03_05-2013_03_17_1_comp.fits'
     ]
     
     # continuum extensions (if using continuum files)
     continuum_extensions = ['B_CONTINUUM', 'R_CONTINUUM']
     
     # output directory
-    output_dir = '/Users/scol0322/Documents/output/65410-combined'
+    output_dir = '/Users/scol0322/Documents/output/485885-combined'
     
     # processing parameters
     pixelscale_arcsec = 0.5        # SAMI spatial sampling
-    redshift = 0.043514            # target redshift
+    redshift = 0.055            # target redshift
     
     # windowing parameters
     window_size = 15.0             # half-width in Angstroms (±15 Å = 30 Å total)

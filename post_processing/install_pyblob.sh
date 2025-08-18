@@ -4,6 +4,9 @@
 
 echo "Installing pyblobby3d package..."
 
+# Uninstall any existing version of pyblobby3d
+pip uninstall pyblobby3d -y
+
 # Navigate to the pyblobby3d directory
 cd ../pyblobby3d
 
